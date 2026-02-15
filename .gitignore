@@ -1,0 +1,6 @@
+
+# shell scripts
+*.sh
+
+fmri_data/*
+figures/*
