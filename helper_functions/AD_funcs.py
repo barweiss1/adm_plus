@@ -7,282 +7,10 @@ from sklearn.decomposition import TruncatedSVD
 import scipy.sparse as sp
 from time import time
 from helper_functions.utils import replace_nan_inf, print_memory_usage
+from helper_functions.embed_utils import (Create_Transition_Mat, Create_Asym_Tran_Kernel, 
+                                          sort_evd_components, sort_svd_components, row_norm, column_norm)
 
 # ------------- Functions for alternating diffusion and variants ------------
-
-
-# Function that column normalizes the kernel
-# def column_norm(K):
-#     # Noramalize kernel matrix columns to create Markov transition matrix
-#     col_sum = np.sum(K, axis=0)
-#     inv_sum = col_sum ** (-1)
-#     norm_mat = np.diag(inv_sum.T)
-#     P = K @ norm_mat  # normalize columns
-#     return P
-
-def column_norm(K):
-    if sp.issparse(K):
-            # Compute column sums for sparse matrix
-            col_sum = np.array(K.sum(axis=0)).flatten()
-            # Handle division by zero in col_sum
-            col_sum[col_sum == 0] = 1
-            # Compute the inverse of column sums
-            inv_sum = 1.0 / col_sum
-            # remove inf values in inv_sum
-            inv_sum[np.isinf(inv_sum)] = 1
-            # Create diagonal matrix with inverse column sums
-            norm_mat = sp.diags(inv_sum)
-            # Normalize columns
-            P = K @ norm_mat
-    else:
-        # Compute column sums for dense matrix
-        col_sum = np.sum(K, axis=0)
-        # Handle division by zero in col_sum
-        col_sum[col_sum == 0] = 1
-        # Compute the inverse of column sums
-        inv_sum = 1.0 / col_sum
-        # remove inf values in inv_sum
-        inv_sum[np.isinf(inv_sum)] = 1
-        # Create diagonal matrix with inverse column sums
-        norm_mat = np.diag(inv_sum)
-        # Normalize columns
-        P = K @ norm_mat
-    return P
-
-
-def row_norm(K):
-    if sp.issparse(K):
-            # Compute column sums for sparse matrix
-            col_sum = np.array(K.sum(axis=1)).flatten()
-            # Handle division by zero in col_sum
-            col_sum[col_sum == 0] = 1
-            # Compute the inverse of column sums
-            inv_sum = 1.0 / col_sum
-            # remove inf values in inv_sum
-            inv_sum[np.isinf(inv_sum)] = 1
-            # Create diagonal matrix with inverse column sums
-            norm_mat = sp.diags(inv_sum)
-            # Normalize columns
-            P = norm_mat @ K
-    else:
-        # Compute column sums for dense matrix
-        col_sum = np.sum(K, axis=1)
-        # Handle division by zero in col_sum
-        col_sum[col_sum == 0] = 1
-        # Compute the inverse of column sums
-        inv_sum = 1.0 / col_sum
-        # remove inf values in inv_sum
-        inv_sum[np.isinf(inv_sum)] = 1
-        # Create diagonal matrix with inverse column sums
-        norm_mat = np.diag(inv_sum)
-        # Normalize columns
-        P = norm_mat @ K
-    return P
-
-# Function to create Markov Transition matrix for Standard Diffusion Map Algorithm
-def Create_Transition_Mat(data_points, scale=2, mode='median'):
-    # Calculate the kernel matrix
-    start_time = time()
-    N = data_points.shape[0]
-    dist_mat = sci.spatial.distance.pdist(data_points, metric='euclidean')
-    dist_mat = sci.spatial.distance.squareform(dist_mat)
-
-    # Compute Kernel
-    if mode == 'median':
-        sigma = np.median(dist_mat) * scale # popular choice for sigma
-    elif mode == 'scale':
-        sigma = scale
-    else:
-        raise ValueError(f'invalid mode {mode}')
-    K_mat = np.exp(-dist_mat ** 2 / (sigma ** 2))
-    # Noramalize kernel matrix columns to create Markov transition matrix
-    P = column_norm(K_mat)
-    end_time = time()
-    print(f' Kernel computation finished, in {end_time - start_time} seconds')
-    return K_mat, P
-
-
-def dist2kernel(dist_mat, scale=2, zero_diag=False, k=None):
-    '''
-    function that computes a similarity kernel from a distance matrix
-    :param dist_mat: the distance matrix
-    :param scale: scale factor for the similarity kernel (multiplies the distance median squared)
-    :param zero_diag: whether to zero out the diagonal elements of the kernel
-    :param k: number of nearest neighbors used in the kernel - only NN have non-zero similarity
-        (if None then all elements are used)
-    :return: K_mat: the similarity kernel
-    '''
-    # Ensure dist_mat is a numpy array
-    dist_mat = np.array(dist_mat)
-
-    if k is not None:
-        # Create a mask for the K nearest neighbors in each row
-        mask = np.zeros_like(dist_mat, dtype=bool)
-        for i in range(dist_mat.shape[0]):
-            nearest_indices = np.argsort(dist_mat[i])[1:k + 1]  # Excluding self
-            mask[i, nearest_indices] = True
-
-        # Extract the distances for the K nearest neighbors
-        k_nearest_distances = dist_mat[mask]
-
-        # Compute sigma using the median of the non-zero elements of the K nearest distances
-        sigma = np.median(k_nearest_distances[k_nearest_distances > 0])
-
-        # Initialize the kernel matrix with zeros
-        K_mat = np.zeros_like(dist_mat)
-
-        # Compute the kernel for the K nearest points
-        for i in range(dist_mat.shape[0]):
-            nearest_indices = np.argsort(dist_mat[i])[1:k + 1]  # Excluding self
-            K_mat[i, nearest_indices] = np.exp(-dist_mat[i, nearest_indices] ** 2 / (scale * sigma ** 2))
-
-    else:
-        # Compute sigma using the median of the non-zero elements in the distance matrix
-        sigma = np.median(dist_mat[dist_mat > 0])
-
-        # Compute the kernel for all points
-        K_mat = np.exp(-dist_mat ** 2 / (scale * sigma ** 2))
-
-    # Zero out the diagonal to eliminate self-loops
-    if zero_diag:
-        np.fill_diagonal(K_mat, 0)
-
-    return K_mat
-
-
-# compute kernel with sparsification for better time and memory
-def Create_Transition_Mat_Sparse(data_points, k=1000, scale=1):
-    # Compute the k-nearest neighbors indicator
-    start_time = time()
-    knn_graph = kneighbors_graph(data_points, n_neighbors=k, mode='connectivity', metric='euclidean')
-
-    # Get the indices of the k-nearest neighbors for each point
-    roots_idx, neighbors_idx = knn_graph.nonzero()
-
-    # Initialize a sparse matrix for the kernel matrix
-    n_samples = data_points.shape[0]
-    K_mat = sp.lil_matrix((n_samples, n_samples), dtype=float)
-
-    # Compute pairwise distances and median sigma
-    distances = np.linalg.norm(data_points[roots_idx] - data_points[neighbors_idx], axis=1)
-    sigma = np.median(distances)
-
-    # Compute Kernel for KNN
-    K_mat[roots_idx, neighbors_idx] = np.exp(-distances ** 2 / (scale * sigma ** 2))
-    K_mat[neighbors_idx, roots_idx] = np.exp(-distances ** 2 / (scale * sigma ** 2))
-
-    # Normalize columns
-    P = column_norm(K_mat)
-
-    end_time = time()
-    print(f'Kernel computation finished, in {end_time - start_time} seconds')
-
-    return K_mat, P
-
-
-# Function to create asymmetric transition kernel - for out of sample extension
-def Create_Asym_Tran_Kernel(data_points1, data_points2, scale=2, mode='median'):
-    # data_points2 should be the reference set!
-    start_time = time()
-    # Calculate the kernel matrix
-    dist_mat = sci.spatial.distance.cdist(data_points1, data_points2, metric='euclidean')
-
-    # Compute Kernel
-    sigma = np.median(dist_mat)  # popular choice for sigma
-
-    if mode == 'median':
-        sigma = np.median(dist_mat) * scale  # popular choice for sigma
-    elif mode == 'scale':
-        sigma = scale
-    else:
-        raise ValueError(f'invalid mode {mode}')
-    A = np.exp(-dist_mat ** 2 / (sigma ** 2))
-    # Normalize columns of K_mat
-    P_L = row_norm(A)
-
-    # Normalize columns of K_mat Transpose
-    P_R = row_norm(A.T)
-    end_time = time()
-    print(f' Kernel computation finished, in {end_time - start_time} seconds')
-    return A, P_L, P_R
-
-
-# Function to create a sparse asymmetric transition kernel - for out of sample extension
-def Create_Asym_Tran_Kernel_Sparse(data_points1, data_points2, k=1000, scale=1):
-    # Compute the k-nearest neighbors indicator
-    start_time = time()
-    # Fit NearestNeighbors on data_points2
-    nn_model = NearestNeighbors(n_neighbors=k, algorithm='kd_tree')
-    nn_model.fit(data_points2)
-
-    # Find k-nearest neighbors for each point in data_points1
-    distances, indices = nn_model.kneighbors(data_points1)
-
-    # compute median for the kernel scale
-    sigma = np.median(distances.flatten())
-
-    # Initialize a sparse matrix for the bipartite KNN graph
-    n_samples_1 = data_points1.shape[0]
-    n_samples_2 = data_points2.shape[0]
-    A = sp.lil_matrix((n_samples_1, n_samples_2), dtype=float)
-
-    # Set True for nearest neighbors in the bipartite KNN graph
-    idx1 = np.arange(n_samples_1)
-    for kk in range(k):
-        A[idx1, indices[idx1, kk]] = np.exp(-distances[:, kk] ** 2 / (scale * sigma ** 2))
-
-    # Normalize columns of K_mat
-    P_L = row_norm(A)
-
-    # Normalize columns of K_mat Transpose
-    P_R = row_norm(A.T)
-    end_time = time()
-    print(f' Kernel computation finished, in {end_time - start_time} seconds')
-    return A, P_L, P_R
-
-
-# Function to create roseland kernel matrix
-def Roseland_Asym_Kernel(data_points1, data_points2, scale=2):
-    # data_points2 should be the reference set!
-    start_time = time()
-    # Calculate the kernel matrix
-    dist_mat = sci.spatial.distance.cdist(data_points1, data_points2, metric='euclidean')
-
-    # Compute Kernel
-    sigma = np.median(dist_mat)  # popular choice for sigma
-    K_mat = np.exp(-dist_mat ** 2 / (scale * sigma ** 2))
-
-    end_time = time()
-    print(f' Kernel computation finished, in {end_time - start_time} seconds')
-    return K_mat
-
-
-# implement a metric for embedding quality of each point
-def embed_score(embed_orig, embed_new):
-    score = np.abs(embed_orig - embed_new)
-    return score
-
-
-# uniqify eigenvectors
-def eigvec_uniq(vecs):
-    # make vectors unique by ensuring the sum of elements is positive
-    sum_sign = np.sum(vecs, axis=0) / (np.abs(np.sum(vecs,axis=0)) + 1e-12)
-    return vecs*np.reshape(vecs, newshape=(-1, 1))
-
-
-def sort_evd_components(vals, vecs):
-    srt_idx = np.argsort(np.abs(vals))[::-1]  # sort indecies to use the vectors with the biggest eigenvalues
-    vals = vals[srt_idx]
-    vecs = vecs[:, srt_idx]
-    return vals, vecs
-
-
-def sort_svd_components(vecs_l, vals, vecs_r):
-    srt_idx = np.argsort(np.abs(vals))[::-1]  # sort indecies to use the vectors with the biggest eigenvalues
-    vals = vals[srt_idx]
-    vecs_l = vecs_l[:, srt_idx]
-    vecs_r = vecs_r[srt_idx, :]
-    return vecs_l, vals, vecs_r
 
 
 def diffusion_map(s=None, embed_dim=2, t=1, K=None, stabilize=False, tol=1e-8, solver='arpack', return_vecs=False):
@@ -434,21 +162,21 @@ def apmc_embed(s1_ref, s1_full, s2_ref, embed_dim, scale=1, A1=None, K2_ref=None
 
 
 def ncca(s1_ref, s1_full, s2_ref, embed_dim, scale=1, A1=None, K2_ref=None, return_vecs=False):
-    """"
-                Computes NCCA (Michaeli 2016)
+    """"   
+        Computes NCCA (Michaeli 2016)
 
-                Inputs:
-                s1_full - (samples_total, features) sensor 1 samples from the total set
-                s1_ref - (samples_ref, features) sensor 1 samples from the reference set
-                s2_ref - (samples_ref, features) sensor 2 samples from the reference set
-                embed_dim - embedding dimension
-                A1 (optional) - (samples_total, samples_ref) first sensor total to reference similarity kernel (if isn't provided the function will compute it)
-                K2 (optional) - (samples_ref, samples_ref) second sensor similarity kernel (if isn't provided the function will compute it)
-                ffbb - flag indicating if the used kernel is the FFBB kernel (P1_LP2Q2P1_R) or FBFB kernel (P1_LQ2P2Q1_R)
+        Inputs:
+        s1_full - (samples_total, features) sensor 1 samples from the total set
+        s1_ref - (samples_ref, features) sensor 1 samples from the reference set
+        s2_ref - (samples_ref, features) sensor 2 samples from the reference set
+        embed_dim - embedding dimension
+        A1 (optional) - (samples_total, samples_ref) first sensor total to reference similarity kernel (if isn't provided the function will compute it)
+        K2 (optional) - (samples_ref, samples_ref) second sensor similarity kernel (if isn't provided the function will compute it)
+        ffbb - flag indicating if the used kernel is the FFBB kernel (P1_LP2Q2P1_R) or FBFB kernel (P1_LQ2P2Q1_R)
 
-                return: embedding (samples, embed_dim)
-                and kernels A1, K2
-                """
+        return: embedding (samples, embed_dim)
+        and kernels A1, K2
+    """
 
     # calculate kernels - if provided use them, else calculate
     if A1 is None or K2_ref is None:
@@ -475,21 +203,21 @@ def ncca(s1_ref, s1_full, s2_ref, embed_dim, scale=1, A1=None, K2_ref=None, retu
 
 def kcca(s1_ref, s1_full, s2_ref, embed_dim, scale=1, reg=1e-3, A1=None, K2_ref=None, return_vecs=False):
     """"
-                Computes KCCA (Fukumizu 2007)
+        Computes KCCA (Fukumizu 2007)
 
-                Inputs:
-                s1_full - (samples_total, features) sensor 1 samples from the total set
-                s1_ref - (samples_ref, features) sensor 1 samples from the reference set
-                s2_ref - (samples_ref, features) sensor 2 samples from the reference set
-                embed_dim - embedding dimension
-                t - diffusion time scale
-                A1 (optional) - (samples_total, samples_ref) first sensor total to reference similarity kernel (if isn't provided the function will compute it)
-                K2 (optional) - (samples_ref, samples_ref) second sensor similarity kernel (if isn't provided the function will compute it)
-                ffbb - flag indicating if the used kernel is the FFBB kernel (P1_LP2Q2P1_R) or FBFB kernel (P1_LQ2P2Q1_R)
+        Inputs:
+        s1_full - (samples_total, features) sensor 1 samples from the total set
+        s1_ref - (samples_ref, features) sensor 1 samples from the reference set
+        s2_ref - (samples_ref, features) sensor 2 samples from the reference set
+        embed_dim - embedding dimension
+        t - diffusion time scale
+        A1 (optional) - (samples_total, samples_ref) first sensor total to reference similarity kernel (if isn't provided the function will compute it)
+        K2 (optional) - (samples_ref, samples_ref) second sensor similarity kernel (if isn't provided the function will compute it)
+        ffbb - flag indicating if the used kernel is the FFBB kernel (P1_LP2Q2P1_R) or FBFB kernel (P1_LQ2P2Q1_R)
 
-                return: embedding (samples, embed_dim)
-                and kernels A1, K2
-                """
+        return: embedding (samples, embed_dim)
+        and kernels A1, K2
+    """
     # calculate kernels - if provided use them, else calculate
     if A1 is None or K2_ref is None:
         A1, _, _ = Create_Asym_Tran_Kernel(s1_full, s1_ref, scale=scale)
@@ -524,21 +252,21 @@ def kcca(s1_ref, s1_full, s2_ref, embed_dim, scale=1, reg=1e-3, A1=None, K2_ref=
 
 def kcca_impute(s1_full, s2_ref, embed_dim, scale=1, reg=1e-3, K1=None, K2_ref=None, return_vecs=False):
     """"
-                    Computes KCCA with incomplete view (Trivedi 2010)
+        Computes KCCA with incomplete view (Trivedi 2010)
 
-                    Inputs:
-                    s1_full - (samples_total, features) sensor 1 samples from the total set
-                    s1_ref - (samples_ref, features) sensor 1 samples from the reference set
-                    s2_ref - (samples_ref, features) sensor 2 samples from the reference set
-                    embed_dim - embedding dimension
-                    t - diffusion time scale
-                    A1 (optional) - (samples_total, samples_ref) first sensor total to reference similarity kernel (if isn't provided the function will compute it)
-                    K2 (optional) - (samples_ref, samples_ref) second sensor similarity kernel (if isn't provided the function will compute it)
-                    ffbb - flag indicating if the used kernel is the FFBB kernel (P1_LP2Q2P1_R) or FBFB kernel (P1_LQ2P2Q1_R)
+        Inputs:
+        s1_full - (samples_total, features) sensor 1 samples from the total set
+        s1_ref - (samples_ref, features) sensor 1 samples from the reference set
+        s2_ref - (samples_ref, features) sensor 2 samples from the reference set
+        embed_dim - embedding dimension
+        t - diffusion time scale
+        A1 (optional) - (samples_total, samples_ref) first sensor total to reference similarity kernel (if isn't provided the function will compute it)
+        K2 (optional) - (samples_ref, samples_ref) second sensor similarity kernel (if isn't provided the function will compute it)
+        ffbb - flag indicating if the used kernel is the FFBB kernel (P1_LP2Q2P1_R) or FBFB kernel (P1_LQ2P2Q1_R)
 
-                    return: embedding (samples, embed_dim)
-                    and kernels A1, K2
-                    """
+        return: embedding (samples, embed_dim)
+        and kernels A1, K2
+    """
     # calculate kernels - if provided use them, else calculate
     if K1 is None or K2_ref is None:
         K1, _ = Create_Transition_Mat(s1_full, scale=scale)
@@ -565,21 +293,21 @@ def kcca_impute(s1_full, s2_ref, embed_dim, scale=1, reg=1e-3, K1=None, K2_ref=N
 def kcca_full(s1_full, s2_full, embed_dim, scale=1, reg=1e-3, K1=None, K2=None, return_vecs=False):
     # similar implementation to the one use in the deeptime package
     """"
-                Computes KCCA (Fukumizu 2007)
+        Computes KCCA (Fukumizu 2007)
 
-                Inputs:
-                s1_full - (samples_total, features) sensor 1 samples from the total set
-                s1_ref - (samples_ref, features) sensor 1 samples from the reference set
-                s2_ref - (samples_ref, features) sensor 2 samples from the reference set
-                embed_dim - embedding dimension
-                t - diffusion time scale
-                A1 (optional) - (samples_total, samples_ref) first sensor total to reference similarity kernel (if isn't provided the function will compute it)
-                K2 (optional) - (samples_ref, samples_ref) second sensor similarity kernel (if isn't provided the function will compute it)
-                ffbb - flag indicating if the used kernel is the FFBB kernel (P1_LP2Q2P1_R) or FBFB kernel (P1_LQ2P2Q1_R)
+        Inputs:
+        s1_full - (samples_total, features) sensor 1 samples from the total set
+        s1_ref - (samples_ref, features) sensor 1 samples from the reference set
+        s2_ref - (samples_ref, features) sensor 2 samples from the reference set
+        embed_dim - embedding dimension
+        t - diffusion time scale
+        A1 (optional) - (samples_total, samples_ref) first sensor total to reference similarity kernel (if isn't provided the function will compute it)
+        K2 (optional) - (samples_ref, samples_ref) second sensor similarity kernel (if isn't provided the function will compute it)
+        ffbb - flag indicating if the used kernel is the FFBB kernel (P1_LP2Q2P1_R) or FBFB kernel (P1_LQ2P2Q1_R)
 
-                return: embedding (samples, embed_dim)
-                and kernels A1, K2
-                """
+        return: embedding (samples, embed_dim)
+        and kernels A1, K2
+    """
     # calculate kernels - if provided use them, else calculate
     if K1 is None or K2 is None:
         K1, _ = Create_Transition_Mat(s1_full, scale=scale)
@@ -604,21 +332,21 @@ def kcca_full(s1_full, s2_full, embed_dim, scale=1, reg=1e-3, K1=None, K2=None, 
 
 def nystrom_ad(s1_ref, s1_full, s2_ref, embed_dim, t=1, A1=None, K2_ref=None, return_vecs=False):
     """"
-                Computes Nystom ADM extension (Dov et al. 2016)
+        Computes Nystom ADM extension (Dov et al. 2016)
 
-                Inputs:
-                s1_full - (samples_total, features) sensor 1 samples from the total set
-                s1_ref - (samples_ref, features) sensor 1 samples from the reference set
-                s2_ref - (samples_ref, features) sensor 2 samples from the reference set
-                embed_dim - embedding dimension
-                t - diffusion time scale
-                A1 (optional) - (samples_total, samples_ref) first sensor total to reference similarity kernel (if isn't provided the function will compute it)
-                K2 (optional) - (samples_ref, samples_ref) second sensor similarity kernel (if isn't provided the function will compute it)
-                ffbb - flag indicating if the used kernel is the FFBB kernel (P1_LP2Q2P1_R) or FBFB kernel (P1_LQ2P2Q1_R)
+        Inputs:
+        s1_full - (samples_total, features) sensor 1 samples from the total set
+        s1_ref - (samples_ref, features) sensor 1 samples from the reference set
+        s2_ref - (samples_ref, features) sensor 2 samples from the reference set
+        embed_dim - embedding dimension
+        t - diffusion time scale
+        A1 (optional) - (samples_total, samples_ref) first sensor total to reference similarity kernel (if isn't provided the function will compute it)
+        K2 (optional) - (samples_ref, samples_ref) second sensor similarity kernel (if isn't provided the function will compute it)
+        ffbb - flag indicating if the used kernel is the FFBB kernel (P1_LP2Q2P1_R) or FBFB kernel (P1_LQ2P2Q1_R)
 
-                return: embedding (samples, embed_dim)
-                and kernels A1, K2
-                """
+        return: embedding (samples, embed_dim)
+        and kernels A1, K2
+    """
 
     # calculate kernels - if provided use them, else calculate
     if A1 is None or K2_ref is None:
@@ -661,11 +389,11 @@ def SVD_trick(P, embed_dim, solver='arpack', side='left'):
 def LAD_trick(M1, M2, dim, fast_comp=True, solver='arpack', delete_kernels=False, stabilize=False, tol=0):
     """
 
-    :param M1: N X NR
-    :param M2: NR X N
-    :param dim: dimension of the embedding space
-    :param fast_comp: flag indicating whether to compute fast or implicitly
-    :return: embedding
+        :param M1: N X NR
+        :param M2: NR X N
+        :param dim: dimension of the embedding space
+        :param fast_comp: flag indicating whether to compute fast or implicitly
+        :return: embedding
     """
     # compute evd efficiently
     if fast_comp:
@@ -688,25 +416,25 @@ def LAD_trick(M1, M2, dim, fast_comp=True, solver='arpack', delete_kernels=False
 
 def ad_forward_only(s1_full=None, s1_ref=None, s2_ref=None, embed_dim=2, t=1, A1=None, K2=None, fast_comp=True,
                     solver='arpack', delete_kernels=False, stabilize=False, tol=0, return_vecs=False):
-    """"
-            computes forward-only alternating diffusion map extension, extends the embedding
-            with missing measurements from the second view.
-            Important note: the order of all measurements must be aligned (s1_full[i,:], s1_ref[i,:] and s2_ref[i,:]
-            must all be aligned measurements)
+    """
+        computes forward-only alternating diffusion map extension, extends the embedding
+        with missing measurements from the second view.
+        Important note: the order of all measurements must be aligned (s1_full[i,:], s1_ref[i,:] and s2_ref[i,:]
+        must all be aligned measurements)
 
-            Inputs:
-            s1_full - (samples_total, features) sensor 1 samples from the total set
-            s1_ref - (samples_ref, features) sensor 1 samples from the reference set
-            s2_ref - (samples_ref, features) sensor 2 samples from the reference set
-            embed_dim - embedding dimension
-            t - diffusion time scale
-            K1 (optional) - first sensor similarity kernel (if isn't provided the function will compute it
-            K2 (optional) - second sensor similarity kernel (if isn't provided the function will compute it
-            fast_comp - flag determining whether the EVD computation is explicit or uses LeAD trick
+        Inputs:
+        s1_full - (samples_total, features) sensor 1 samples from the total set
+        s1_ref - (samples_ref, features) sensor 1 samples from the reference set
+        s2_ref - (samples_ref, features) sensor 2 samples from the reference set
+        embed_dim - embedding dimension
+        t - diffusion time scale
+        K1 (optional) - first sensor similarity kernel (if isn't provided the function will compute it
+        K2 (optional) - second sensor similarity kernel (if isn't provided the function will compute it
+        fast_comp - flag determining whether the EVD computation is explicit or uses LeAD trick
 
-            return: embedding (samples, embed_dim)
-            and kernels A1,K2
-            """
+        return: embedding (samples, embed_dim)
+        and kernels A1,K2
+    """
 
     # calculate kernels - if provided use them, else calculate
     if A1 is None or K2 is None:
@@ -751,24 +479,24 @@ def ad_forward_only(s1_full=None, s1_ref=None, s2_ref=None, embed_dim=2, t=1, A1
 def ad_backward_only(s1_full=None, s1_ref=None, s2_ref=None, embed_dim=2, t=1, A1=None, K2=None, fast_comp=True,
                     solver='arpack', delete_kernels=False, stabilize=False, tol=0, return_vecs=False):
     """"
-            computes forward-only alternating diffusion map extension, extends the embedding
-            with missing measurements from the second view.
-            Important note: the order of all measurements must be aligned (s1_full[i,:], s1_ref[i,:] and s2_ref[i,:]
-            must all be aligned measurements)
+        computes forward-only alternating diffusion map extension, extends the embedding
+        with missing measurements from the second view.
+        Important note: the order of all measurements must be aligned (s1_full[i,:], s1_ref[i,:] and s2_ref[i,:]
+        must all be aligned measurements)
 
-            Inputs:
-            s1_full - (samples_total, features) sensor 1 samples from the total set
-            s1_ref - (samples_ref, features) sensor 1 samples from the reference set
-            s2_ref - (samples_ref, features) sensor 2 samples from the reference set
-            embed_dim - embedding dimension
-            t - diffusion time scale
-            K1 (optional) - first sensor similarity kernel (if isn't provided the function will compute it
-            K2 (optional) - second sensor similarity kernel (if isn't provided the function will compute it
-            fast_comp - flag determining whether the EVD computation is explicit or uses LeAD trick
+        Inputs:
+        s1_full - (samples_total, features) sensor 1 samples from the total set
+        s1_ref - (samples_ref, features) sensor 1 samples from the reference set
+        s2_ref - (samples_ref, features) sensor 2 samples from the reference set
+        embed_dim - embedding dimension
+        t - diffusion time scale
+        K1 (optional) - first sensor similarity kernel (if isn't provided the function will compute it
+        K2 (optional) - second sensor similarity kernel (if isn't provided the function will compute it
+        fast_comp - flag determining whether the EVD computation is explicit or uses LeAD trick
 
-            return: embedding (samples, embed_dim)
-            and kernels A1,K2
-            """
+        return: embedding (samples, embed_dim)
+        and kernels A1,K2
+    """
 
     # calculate kernels - if provided use them, else calculate
     if A1 is None or K2 is None:
@@ -816,8 +544,8 @@ def LAD_embedding(s1_ref, s1_full, s2_ref, s2_full, dim=2, t=1, A1=None, A2=None
                    solver='arpack', delete_kernels=False, stabilize=False, tol=0, return_vecs=False):
     # build kernels if not provided
     if A1 is None or A2 is None:
-        A1 = Roseland_Asym_Kernel(s1_full, s1_ref)
-        A2 = Roseland_Asym_Kernel(s2_full, s2_ref)
+        A1 = Create_Asym_Tran_Kernel(s1_full, s1_ref, mode='median')
+        A2 = Create_Asym_Tran_Kernel(s2_full, s2_ref, mode='median')
     # calculate second diffusion matrix
     temp_sum = np.array(A2.T @ np.sum(A2, axis=1)).flatten()
     D2_inv = sp.diags(1 / temp_sum)
@@ -852,23 +580,23 @@ def LAD_embedding(s1_ref, s1_full, s2_ref, s2_full, dim=2, t=1, A1=None, A2=None
 def alternating_roseland(s1_ref=None, s1_full=None, s2_ref=None, embed_dim=2, t=1, A1=None, K2=None,
                          solver='arpack', delete_kernels=False, return_vecs=False):
     """"
-                computes alternating roseland map, extends the embedding
-                with missing measurements from the second view.
-                Important note: the order of all measurements must be aligned (s1_full[i,:], s1_ref[i,:] and s2_ref[i,:]
-                must all be aligned measurements)
+        computes alternating roseland map, extends the embedding
+        with missing measurements from the second view.
+        Important note: the order of all measurements must be aligned (s1_full[i,:], s1_ref[i,:] and s2_ref[i,:]
+        must all be aligned measurements)
 
-                Inputs:
-                s1_full - (samples_total, features) sensor 1 samples from the total set
-                s1_ref - (samples_ref, features) sensor 1 samples from the reference set
-                s2_ref - (samples_ref, features) sensor 2 samples from the reference set
-                embed_dim - embedding dimension
-                t - diffusion time scale
-                A1 (optional) - first sensor total to reference similarity kernel (if isn't provided the function will compute it)
-                K2 (optional) - second sensor similarity kernel (if isn't provided the function will compute it)
+        Inputs:
+        s1_full - (samples_total, features) sensor 1 samples from the total set
+        s1_ref - (samples_ref, features) sensor 1 samples from the reference set
+        s2_ref - (samples_ref, features) sensor 2 samples from the reference set
+        embed_dim - embedding dimension
+        t - diffusion time scale
+        A1 (optional) - first sensor total to reference similarity kernel (if isn't provided the function will compute it)
+        K2 (optional) - second sensor similarity kernel (if isn't provided the function will compute it)
 
-                return: embedding (samples, embed_dim)
-                and kernels A1,K2
-                """
+        return: embedding (samples, embed_dim)
+        and kernels A1,K2
+    """
 
     # calculate kernels - if provided use them, else calculate
     if A1 is None or K2 is None:
@@ -906,24 +634,24 @@ def alternating_roseland(s1_ref=None, s1_full=None, s2_ref=None, embed_dim=2, t=
 def ad_forward_backward(s1_ref=None, s1_full=None, s2_ref=None, embed_dim=2, t=1, A1=None, K2_ref=None, ffbb=False,
                         solver='arpack', delete_kernels=False, return_vecs=False):
     """"
-                computes forward-backward alternating diffusion map extension, extends the embedding
-                with missing measurements from the second view.
-                Important note: the order of all measurements must be aligned (s1_full[i,:], s1_ref[i,:] and s2_ref[i,:]
-                must all be aligned measurements)
+        computes forward-backward alternating diffusion map extension, extends the embedding
+        with missing measurements from the second view.
+        Important note: the order of all measurements must be aligned (s1_full[i,:], s1_ref[i,:] and s2_ref[i,:]
+        must all be aligned measurements)
 
-                Inputs:
-                s1_full - (samples_total, features) sensor 1 samples from the total set
-                s1_ref - (samples_ref, features) sensor 1 samples from the reference set
-                s2_ref - (samples_ref, features) sensor 2 samples from the reference set
-                embed_dim - embedding dimension
-                t - diffusion time scale
-                A1 (optional) - first sensor total to reference similarity kernel (if isn't provided the function will compute it)
-                K2 (optional) - second sensor similarity kernel (if isn't provided the function will compute it)
-                ffbb - flag indicating if the used kernel is the FFBB kernel (P1_LP2Q2P1_R) or FBFB kernel (P1_LQ2P2Q1_R)
+        Inputs:
+        s1_full - (samples_total, features) sensor 1 samples from the total set
+        s1_ref - (samples_ref, features) sensor 1 samples from the reference set
+        s2_ref - (samples_ref, features) sensor 2 samples from the reference set
+        embed_dim - embedding dimension
+        t - diffusion time scale
+        A1 (optional) - first sensor total to reference similarity kernel (if isn't provided the function will compute it)
+        K2 (optional) - second sensor similarity kernel (if isn't provided the function will compute it)
+        ffbb - flag indicating if the used kernel is the FFBB kernel (P1_LP2Q2P1_R) or FBFB kernel (P1_LQ2P2Q1_R)
 
-                return: embedding (samples, embed_dim)
-                and kernels A1,K2
-                """
+        return: embedding (samples, embed_dim)
+        and kernels A1,K2
+    """
     # print_memory_usage('Entered FBFB')
     # calculate kernels - if provided use them, else calculate
     if A1 is None or K2_ref is None:
@@ -957,29 +685,29 @@ def ad_forward_backward(s1_ref=None, s1_full=None, s2_ref=None, embed_dim=2, t=1
 def adm_plus(s1_ref=None, s1_full=None, s2_ref=None, embed_dim=2, t=1, A1=None, K2_ref=None, solver='arpack',
              delete_kernels=False, return_vecs=False):
     """"
-                computes forward-backward alternating diffusion map extension, extends the embedding
-                with missing measurements from the second view.
-                Important note: the order of all measurements must be aligned (s1_full[i,:], s1_ref[i,:] and s2_ref[i,:]
-                must all be aligned measurements)
+        computes forward-backward alternating diffusion map extension, extends the embedding
+        with missing measurements from the second view.
+        Important note: the order of all measurements must be aligned (s1_full[i,:], s1_ref[i,:] and s2_ref[i,:]
+        must all be aligned measurements)
 
-                Inputs:
-                s1_full - (samples_total, features) sensor 1 samples from the total set
-                s1_ref - (samples_ref, features) sensor 1 samples from the reference set
-                s2_ref - (samples_ref, features) sensor 2 samples from the reference set
-                embed_dim - embedding dimension
-                t - diffusion time scale
-                A1 (optional) - first sensor total to reference similarity kernel (if isn't provided the function will compute it)
-                K2 (optional) - second sensor similarity kernel (if isn't provided the function will compute it)
-                ffbb - flag indicating if the used kernel is the FFBB kernel (P1_+P2Q2Q1_-) or BBFF kernel (Q1_+Q2P2P1_-)
+        Inputs:
+        s1_full - (samples_total, features) sensor 1 samples from the total set
+        s1_ref - (samples_ref, features) sensor 1 samples from the reference set
+        s2_ref - (samples_ref, features) sensor 2 samples from the reference set
+        embed_dim - embedding dimension
+        t - diffusion time scale
+        A1 (optional) - first sensor total to reference similarity kernel (if isn't provided the function will compute it)
+        K2 (optional) - second sensor similarity kernel (if isn't provided the function will compute it)
+        ffbb - flag indicating if the used kernel is the FFBB kernel (P1_+P2Q2Q1_-) or BBFF kernel (Q1_+Q2P2P1_-)
 
-                return: embedding (samples, embed_dim)
-                and kernels A1,K2
-                """
+        return: embedding (samples, embed_dim)
+        and kernels A1,K2
+    """
     # print_memory_usage('Entered FBFB')
     # calculate kernels - if provided use them, else calculate
     if A1 is None or K2_ref is None:
         A1, _, _ = Create_Asym_Tran_Kernel(s1_full, s1_ref)
-        K2, _ = Create_Transition_Mat(s2_ref)
+        K2_ref, _ = Create_Transition_Mat(s2_ref)
 
     Q1_p = column_norm(A1)  # Q1^- N_R X N
     Q2_ref = column_norm(K2_ref)  # Q2_ref N_R X N_R
@@ -999,31 +727,29 @@ def adm_plus(s1_ref=None, s1_full=None, s2_ref=None, embed_dim=2, t=1, A1=None, 
         return np.real((vals[1:embed_dim + 1] ** t) * vecs[:, 1:embed_dim + 1])
 
 
-def prep_kernels(dist_mat1=None, dist_mat2=None, method='forward_only', scale1=2, scale2=None, zero_diag=False, k=None):
-    if scale2 is None:
-        scale2 = scale1
-    # if method in {"forward_only", "forward_only_slow", "alternating_roseland", "ffbb", "fbfb", "ncca",
-    #               "kcca", "nystrom"}:
-    #     A1 = dist2kernel(dist_mat1, scale=scale1, zero_diag=zero_diag, k=k)
-    #     K2_ref = dist2kernel(dist_mat2, scale=scale2, zero_diag=zero_diag, k=k)
-    #     return A1, K2_ref
-    #
-    # elif method in {"ad", 'dm'}:
-    #     K1 = dist2kernel(dist_mat1, scale=scale1, zero_diag=zero_diag, k=k)
-    #     K2 = dist2kernel(dist_mat2, scale=scale2, zero_diag=zero_diag, k=k)
-    #     return K1, K2
-    # elif method == "lead":
-    #     A1 = dist2kernel(dist_mat1, scale=scale1, zero_diag=zero_diag, k=k)
-    #     A2 = dist2kernel(dist_mat2, scale=scale2, zero_diag=zero_diag, k=k)
-    #     return A1, A2
-    K1 = dist2kernel(dist_mat1, scale=scale1, zero_diag=zero_diag, k=k)
-    K2 = dist2kernel(dist_mat2, scale=scale2, zero_diag=zero_diag, k=k)
-    return K1, K2
-
-
 def embed_wrapper(s1_ref=None, s1_full=None, s2_ref=None, s2_full=None, method="forward_only",
                   embed_dim=2, t=1, K1=None, K2=None, solver='arpack', delete_kernels=False,
                   tol=0, stabilize=False, return_vecs=False):
+    """
+        wrapper function to run the different embedding methods based on the specified method argument. 
+        The function receives the data and kernels (if already computed) and runs the required embedding method.
+        Inputs:
+        s1_full - (samples_total, features) sensor 1 samples from the total set
+        s1_ref - (samples_ref, features) sensor 1 samples from the reference set
+        s2_ref - (samples_ref, features) sensor 2 samples from the reference set
+        s2_full - (samples_total, features) sensor 2 samples from the total set (only required for some methods)
+        method - string specifying the embedding method to use
+        embed_dim - embedding dimension
+        t - diffusion time scale
+        K1 - first sensor kernel (if already computed, else will be computed in the method
+        K2 - second sensor kernel (if already computed, else will be computed in the method)
+        solver - eigensolver to use for the EVD/SVD computation
+        delete_kernels - flag indicating whether to delete the kernels after use to save memory
+        tol - tolerance for the eigensolver
+        stabilize - flag indicating whether to use the stabilization trick for the eigensolver
+        return_vecs - flag indicating whether to return the eigenvalues and eigenvectors instead of the embedding
+
+    """
     # this function embeds based to the specified method
     if method == "dm":
         return diffusion_map(s1_full, embed_dim=embed_dim, t=t, K=K1, solver=solver,
@@ -1064,7 +790,7 @@ def embed_wrapper(s1_ref=None, s1_full=None, s2_ref=None, s2_full=None, method="
                                    embed_dim=embed_dim, t=t, A1=K1, K2_ref=K2, ffbb=False, solver=solver,
                                    delete_kernels=delete_kernels, return_vecs=return_vecs)
     elif method == "adm_plus":
-        return adm_plus(s1_ref, s1_full, s2_full,
+        return adm_plus(s1_ref, s1_full, s2_ref,
                                    embed_dim=embed_dim, t=t, A1=K1, K2_ref=K2, solver=solver,
                                    delete_kernels=delete_kernels, return_vecs=return_vecs)
     elif method == "ncca":
