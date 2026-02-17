@@ -549,10 +549,10 @@ def task_classification(data_LR, data_RL=None, method='single', dist_mats=None, 
                     embed_dim = max(embed_params['embed_dims'])
                     start_time = time()
                     if method == 'fimvc_via':
-                        vecs, vals = fimvc_via_embed(view1, view2, embed_dim=embed_dim, 
+                        vecs, vals = fimvc_via_embed(s1_full=view1, s2_ref=view2, embed_dim=embed_dim, 
                                                      mu=embed_params['param1'])
                         run_time = time() - start_time
-                        vecs_val, vals_val = fimvc_via_embed(view1_val, view2_val, 
+                        vecs_val, vals_val = fimvc_via_embed(s1_full=view1_val, s2_ref=view2_val, 
                                                              embed_dim=embed_dim,
                                                              mu=embed_params['param1'])
                     else:
