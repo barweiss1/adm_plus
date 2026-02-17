@@ -30,7 +30,7 @@ def my_save_csv(df, base_filename, sim_params):
 
 
 def load_simulation_params():
-    sim_name = 'shuffle_data_output_validation_seeds'
+    sim_name = 'run_with_optimization_methods'
     sim_params = {
         'sim_name': sim_name,
         'modalities': 'LR-LR',  # tasks, labels, LR-RL, LR-LR
@@ -133,14 +133,25 @@ def run_simulation(args, sim_params):
         with open(f"{data_path}/dist_mats_euclidean.pkl", 'wb') as fp:
             pickle.dump(dist_mats_euclidean, fp)
 
+    # run optimization methods if required
+    train_percents = sim_params['train_percents']
+    job_num = -1
+    result_dfs = []
+    if args.run_opt_methods:
+        for opt_method in sim_params['opt_methods']:
+            for train_percent in train_percents:
+                for mu in sim_params['mu_list']:
+                    job_num += 1
+                    if not job_num % args.n_tasks == args.task_id:
+                        continue
+                    results_df = run_opt_method(LR_smooth, RL_smooth, dist_mats_euclidean,
+                                                None, None, opt_method, None, sim_params)
+                    result_dfs.append(results_df)
     kernel_scales1 = sim_params['kernel_scales1']
     if sim_params['same_scales']:
         kernel_scales2 = [1]  # save runtime
     else:
         kernel_scales2 = sim_params['kernel_scales2']
-    train_percents = sim_params['train_percents']
-    job_num = -1
-    result_dfs = []
     for method in sim_params['methods']:
         for train_percent in train_percents:
             for kernel_scale2 in kernel_scales2:
@@ -152,15 +163,6 @@ def run_simulation(args, sim_params):
                     results_df = run_embed_method(LR_smooth, RL_smooth, dist_mats_euclidean, 
                                                    kernel_scale1, kernel_scale2, method, 
                                                    train_percent, sim_params)
-                    result_dfs.append(results_df)
-    
-    # run optimization methods if required
-    if args.run_opt_methods:
-        for opt_method in sim_params['opt_methods']:
-            for train_percent in train_percents:
-                for mu in sim_params['mu_list']:
-                    results_df = run_opt_method(LR_smooth, RL_smooth, dist_mats_euclidean,
-                                                None, None, opt_method, None, sim_params)
                     result_dfs.append(results_df)
         
     results_all_df = pd.concat(result_dfs)
