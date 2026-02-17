@@ -636,7 +636,7 @@ def adm_plus(s1_ref=None, s1_full=None, s2_ref=None, embed_dim=2, t=1, A1=None, 
 
 # ------------------------ Optimization Methods ---------------------------
 
-def fimvc_via_embed(s1_ref=None, s1_full=None, s2_ref=None, embed_dim=2, mu=1.0, max_iters=50, 
+def fimvc_via_embed(s1_full=None, s2_ref=None, embed_dim=2, mu=1.0, max_iters=50, 
                     normalize_rows=True, random_state=0, verbose=False):
     """
         Computes FIMVC embedding by using the FIMVC class
