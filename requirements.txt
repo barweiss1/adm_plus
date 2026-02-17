@@ -1,0 +1,28 @@
+﻿# Core scientific computing packages
+numpy
+scipy
+pandas
+
+# Machine learning and clustering
+scikit-learn
+scikit-image
+
+# required to simulate the bickley jet experiment
+deeptime
+
+# Visualization
+matplotlib
+seaborn
+
+# Computer vision
+opencv-python
+
+# Progress bars
+tqdm
+
+# System utilities
+psutil
+
+# Jupyter notebook support (optional but recommended)
+jupyter
+ipykernel
