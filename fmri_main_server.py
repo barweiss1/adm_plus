@@ -4,14 +4,14 @@ import json
 import pickle
 import os
 from time import time
-from helper_functions.fmri_funcs import (cross_task_fingerprint, load_data,
-                                         calculate_distances, task_classification)
+from helper_functions.fmri_funcs import (load_data, calculate_distances, task_classification)
 
 
 def setup_arg_parser():
     parser = argparse.ArgumentParser(description="fMRI Simulation Runner")
     parser.add_argument("task_id", type=int, nargs='?', default=0, help="Task ID for parallel execution")
     parser.add_argument("n_tasks", type=int, nargs='?', default=1, help="Number of tasks for parallel execution")
+    parser.add_argument("--run_opt_methods", action='store_true', help="Run the optimization methods as well (FIMVC-VIA, DVSAI)")
 
     return parser.parse_args()
 

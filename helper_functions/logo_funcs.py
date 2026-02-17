@@ -8,7 +8,10 @@ import cv2
 import scipy as sci
 import tqdm
 from scipy import ndimage
-from helper_functions.AD_funcs import Create_Transition_Mat, Create_Asym_Tran_Kernel, embed_wrapper
+from helper_functions.embed_utils import Create_Transition_Mat, Create_Asym_Tran_Kernel
+from helper_functions.embed_methods import embed_wrapper
+from helper_functions.embed_methods import (OPT_METHODS, FULL_VIEW_DIFFUSION_METHODS, PARTIAL_VIEW_DIFFUSION_METHODS,
+                                            FULL_VIEW_KERNEL_METHODS, PARTIAL_VIEW_KERNEL_METHODS, SINGLE_VIEW_METHODS)
 import helper_functions.plotting_funcs as plot_funcs
 
 
@@ -165,14 +168,13 @@ def process_iteration(data_dict, sim_params, validation_idx, figures_path, bias_
 
         for method in sim_params['ad_methods']:
             method_key = f'{method}_scale_{scale}'
-            if method in {"forward_only", "forward_only_slow", "alternating_roseland", "ffbb", "fbfb", "ncca",
-                          "kcca", "nystrom", 'adm_plus', 'backward_only'}:
+            if method in PARTIAL_VIEW_DIFFUSION_METHODS or method in (PARTIAL_VIEW_KERNEL_METHODS - {"kcca_impute"}):
                 embed = embed_wrapper(s1_ref, s1_aligned, s2_ref, s2_aligned, method=method,
                                       embed_dim=sim_params['embed_dim'], t=sim_params['t'],
                                       K1=A1, K2=K2_ref, solver=sim_params['evd_solver'],
                                       delete_kernels=sim_params['delete_kernels'])
                 embed = embed[reorder_idx, :]
-            elif method in {"ad", 'dm', 'kcca_full','ad_svd'}:
+            elif method in SINGLE_VIEW_METHODS or method in (FULL_VIEW_DIFFUSION_METHODS - {'lad'}):
                 embed = embed_wrapper(s1_ref, s1_aligned, s2_ref, s2_aligned, method=method,
                                       embed_dim=sim_params['embed_dim'], t=sim_params['t'],
                                       K1=K1, K2=K2, solver=sim_params['evd_solver'],
@@ -184,7 +186,7 @@ def process_iteration(data_dict, sim_params, validation_idx, figures_path, bias_
                                       K1=K1, K2=K2_ref, solver=sim_params['evd_solver'],
                                       delete_kernels=sim_params['delete_kernels'])
                 embed = embed[reorder_idx, :]
-            elif method == "lead":
+            elif method == "lad":
                 embed = embed_wrapper(s1_ref, s1_aligned, s2_ref, s2_aligned, method=method,
                                       embed_dim=sim_params['embed_dim'], t=sim_params['t'],
                                       K1=A1, K2=A2, solver=sim_params['evd_solver'],

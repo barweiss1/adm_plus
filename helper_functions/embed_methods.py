@@ -10,8 +10,17 @@ from helper_functions.utils import replace_nan_inf, print_memory_usage
 from helper_functions.embed_utils import (Create_Transition_Mat, Create_Asym_Tran_Kernel, 
                                           sort_evd_components, sort_svd_components, row_norm, column_norm)
 
-# ------------- Functions for alternating diffusion and variants ------------
+from helper_functions.opt_methods import DVSAI_IMVC, DVSAIConfig, FIMVCVIAConfig, FIMVC_VIA
 
+
+OPT_METHODS = {'dvsai', 'fimvc_via'}
+FULL_VIEW_DIFFUSION_METHODS = {'ad', 'ad_svd', 'lad'}
+FULL_VIEW_KERNEL_METHODS = {'kcca_full'}
+PARTIAL_VIEW_DIFFUSION_METHODS = {'forward_only', 'backward_only', 'adm_plus', 'nystrom'}
+PARTIAL_VIEW_KERNEL_METHODS = {'ncca', 'apmc', 'kcca_impute'}
+SINGLE_VIEW_METHODS = {'dm'}
+
+# ------------- Functions for alternating diffusion and variants ------------
 
 def diffusion_map(s=None, embed_dim=2, t=1, K=None, stabilize=False, tol=1e-8, solver='arpack', return_vecs=False):
     if K is None:
@@ -115,20 +124,19 @@ def alternating_diffusion(s1=None, s2=None, embed_dim=2, t=1, K1=None, K2=None, 
 
 def apmc_embed(s1_ref, s1_full, s2_ref, embed_dim, scale=1, A1=None, K2_ref=None, return_vecs=False, solver='arpack'):
     """"
-                Computes Anchor Partial Mutliview Clustring embedding (Guo 2019 AAAI)
+        Computes Anchor Partial Mutliview Clustring embedding (Guo 2019 AAAI)
 
-                Inputs:
-                s1_full - (samples_total, features) sensor 1 samples from the total set
-                s1_ref - (samples_ref, features) sensor 1 samples from the reference set
-                s2_ref - (samples_ref, features) sensor 2 samples from the reference set
-                embed_dim - embedding dimension
-                A1 (optional) - (samples_total, samples_ref) first sensor total to reference similarity kernel (if isn't provided the function will compute it)
-                K2 (optional) - (samples_ref, samples_ref) second sensor similarity kernel (if isn't provided the function will compute it)
-                ffbb - flag indicating if the used kernel is the FFBB kernel (P1_LP2Q2P1_R) or FBFB kernel (P1_LQ2P2Q1_R)
+        Inputs:
+        s1_full - (samples_total, features) sensor 1 samples from the total set
+        s1_ref - (samples_ref, features) sensor 1 samples from the anchor set
+        s2_ref - (samples_ref, features) sensor 2 samples from the anchor set
+        embed_dim - embedding dimension
+        A1 (optional) - (samples_total, samples_ref) first sensor total to anchors similarity kernel (if isn't provided the function will compute it)
+        K2 (optional) - (samples_ref, samples_ref) second sensor similarity kernel (if isn't provided the function will compute it)
 
-                return: embedding (samples, embed_dim)
-                and kernels A1, K2
-                """
+        return: embedding (samples, embed_dim)
+        and kernels A1, K2
+    """
 
     # calculate kernels - if provided use them, else calculate
     if A1 is None or K2_ref is None:
@@ -199,55 +207,6 @@ def ncca(s1_ref, s1_full, s2_ref, embed_dim, scale=1, A1=None, K2_ref=None, retu
         return s_vals[1:embed_dim+1], vecs[:, 1:embed_dim+1]
     else:
         return vecs[:, 1:embed_dim+1]
-
-
-def kcca(s1_ref, s1_full, s2_ref, embed_dim, scale=1, reg=1e-3, A1=None, K2_ref=None, return_vecs=False):
-    """"
-        Computes KCCA (Fukumizu 2007)
-
-        Inputs:
-        s1_full - (samples_total, features) sensor 1 samples from the total set
-        s1_ref - (samples_ref, features) sensor 1 samples from the reference set
-        s2_ref - (samples_ref, features) sensor 2 samples from the reference set
-        embed_dim - embedding dimension
-        t - diffusion time scale
-        A1 (optional) - (samples_total, samples_ref) first sensor total to reference similarity kernel (if isn't provided the function will compute it)
-        K2 (optional) - (samples_ref, samples_ref) second sensor similarity kernel (if isn't provided the function will compute it)
-        ffbb - flag indicating if the used kernel is the FFBB kernel (P1_LP2Q2P1_R) or FBFB kernel (P1_LQ2P2Q1_R)
-
-        return: embedding (samples, embed_dim)
-        and kernels A1, K2
-    """
-    # calculate kernels - if provided use them, else calculate
-    if A1 is None or K2_ref is None:
-        A1, _, _ = Create_Asym_Tran_Kernel(s1_full, s1_ref, scale=scale)
-        K2_ref, _ = Create_Transition_Mat(s2_ref, scale=scale)
-    Nr = K2_ref.shape[0]
-    K1_ref = A1[:Nr, :]
-    one_N = np.ones((Nr, Nr)) / Nr
-    K1_ref_centered = K1_ref - one_N @ K1_ref - K1_ref @ one_N + one_N @ K1_ref @ one_N
-    K2_ref_centered = K2_ref - one_N @ K2_ref - K2_ref @ one_N + one_N @ K2_ref @ one_N
-    # regularize the kernels
-    K1_ref_centered += reg * np.eye(Nr)
-    K2_ref_centered += reg * np.eye(Nr)
-    # Solve the generalized eigenvalue problem
-    eigvals, eigvecs = sp.linalg.eigsh(K1_ref_centered @ K2_ref_centered, M=K1_ref_centered @ K1_ref_centered,
-                                       k=embed_dim+3, which='LM')
-    # Sort eigenvectors by eigenvalue
-    indices = np.argsort(eigvals)[::-1]
-    eigvecs = eigvecs[:, indices]
-    # use Nystrom interpolation for extending the embedding outside the reference set
-    K1_oor = A1[Nr:, :]
-    mean_K1_oor = np.mean(K1_oor, axis=0)
-    K1_oor_centered = K1_oor - mean_K1_oor - np.mean(K1_oor, axis=1, keepdims=True) + np.mean(K1_ref)
-    vecs_ref = K1_ref_centered @ eigvecs
-    vecs_oor = K1_oor_centered @ eigvecs
-    vecs = np.concatenate((vecs_ref[:, 1:embed_dim+1], vecs_oor[:, 1:embed_dim+1]), axis=0)
-
-    if return_vecs:
-        return eigvals[1:embed_dim+1], vecs
-    else:
-        return vecs
 
 
 def kcca_impute(s1_full, s2_ref, embed_dim, scale=1, reg=1e-3, K1=None, K2_ref=None, return_vecs=False):
@@ -414,10 +373,10 @@ def LAD_trick(M1, M2, dim, fast_comp=True, solver='arpack', delete_kernels=False
     return vals, vecs_extended
 
 
-def ad_forward_only(s1_full=None, s1_ref=None, s2_ref=None, embed_dim=2, t=1, A1=None, K2=None, fast_comp=True,
+def ad_backward_only(s1_full=None, s1_ref=None, s2_ref=None, embed_dim=2, t=1, A1=None, K2=None, fast_comp=True,
                     solver='arpack', delete_kernels=False, stabilize=False, tol=0, return_vecs=False):
     """
-        computes forward-only alternating diffusion map extension, extends the embedding
+        computes backward-only alternating diffusion map extension, extends the embedding
         with missing measurements from the second view.
         Important note: the order of all measurements must be aligned (s1_full[i,:], s1_ref[i,:] and s2_ref[i,:]
         must all be aligned measurements)
@@ -440,7 +399,9 @@ def ad_forward_only(s1_full=None, s1_ref=None, s2_ref=None, embed_dim=2, t=1, A1
     if A1 is None or K2 is None:
         A1, _, _ = Create_Asym_Tran_Kernel(s1_full, s1_ref)
         K2, _ = Create_Transition_Mat(s2_ref)
-    # normalize matrices
+    
+    # normalize kernels - note that normalization is different (transposed) from the paper as we extract right eigenvectors
+    # instead of left eigenvectors, as they are the default in scipy, the result is of course the same.
     Q1_p = column_norm(A1)  # Q_1^+
     Q1_m = column_norm(A1.T)  # Q_1^-
     Q2_ref = column_norm(K2)
@@ -476,7 +437,7 @@ def ad_forward_only(s1_full=None, s1_ref=None, s2_ref=None, embed_dim=2, t=1, A1
         return np.real((vals[1:embed_dim + 1]**t) * vecs[:, 1:embed_dim + 1])
 
 
-def ad_backward_only(s1_full=None, s1_ref=None, s2_ref=None, embed_dim=2, t=1, A1=None, K2=None, fast_comp=True,
+def ad_forward_only(s1_full=None, s1_ref=None, s2_ref=None, embed_dim=2, t=1, A1=None, K2=None, fast_comp=True,
                     solver='arpack', delete_kernels=False, stabilize=False, tol=0, return_vecs=False):
     """"
         computes forward-only alternating diffusion map extension, extends the embedding
@@ -497,13 +458,13 @@ def ad_backward_only(s1_full=None, s1_ref=None, s2_ref=None, embed_dim=2, t=1, A
         return: embedding (samples, embed_dim)
         and kernels A1,K2
     """
-
     # calculate kernels - if provided use them, else calculate
     if A1 is None or K2 is None:
         A1, _, _ = Create_Asym_Tran_Kernel(s1_full, s1_ref)
         K2, _ = Create_Transition_Mat(s2_ref)
 
-    # normalize kernels
+    # normalize kernels - note that normalization is different (transposed) from the paper as we extract right eigenvectors
+    # instead of left eigenvectors, as they are the default in scipy, the result is of course the same.
     P1_p = row_norm(A1)
     P1_m = row_norm(A1.T)
     P2_ref = row_norm(K2)
@@ -577,60 +538,6 @@ def LAD_embedding(s1_ref, s1_full, s2_ref, s2_full, dim=2, t=1, A1=None, A2=None
         return np.real((vals[1:dim + 1]**t) * vecs[:, 1:dim + 1])
 
 
-def alternating_roseland(s1_ref=None, s1_full=None, s2_ref=None, embed_dim=2, t=1, A1=None, K2=None,
-                         solver='arpack', delete_kernels=False, return_vecs=False):
-    """"
-        computes alternating roseland map, extends the embedding
-        with missing measurements from the second view.
-        Important note: the order of all measurements must be aligned (s1_full[i,:], s1_ref[i,:] and s2_ref[i,:]
-        must all be aligned measurements)
-
-        Inputs:
-        s1_full - (samples_total, features) sensor 1 samples from the total set
-        s1_ref - (samples_ref, features) sensor 1 samples from the reference set
-        s2_ref - (samples_ref, features) sensor 2 samples from the reference set
-        embed_dim - embedding dimension
-        t - diffusion time scale
-        A1 (optional) - first sensor total to reference similarity kernel (if isn't provided the function will compute it)
-        K2 (optional) - second sensor similarity kernel (if isn't provided the function will compute it)
-
-        return: embedding (samples, embed_dim)
-        and kernels A1,K2
-    """
-
-    # calculate kernels - if provided use them, else calculate
-    if A1 is None or K2 is None:
-        Nr = s2_ref.shape[0]
-        A1, _, _ = Create_Asym_Tran_Kernel(s1_full, s1_ref)
-        K2, _ = Create_Transition_Mat(s2_ref)
-
-    # row_sum = A1 @ K2 @ K2 @ np.sum(A1.T, axis=1)
-    # computing the row sum efficiently
-    row_sum = np.sum(A1.T, axis=1)
-    row_sum = K2 @ row_sum
-    row_sum = K2 @ row_sum
-    row_sum = A1 @ row_sum
-    row_sum = np.array(row_sum).flatten()  # flatten row sum to eliminate singleton dimensions
-    D_mh = sp.diags(row_sum ** -0.5)  # compute normalizing matrix
-    # replace the NaN and inf vals with 0
-    svd_kernel = replace_nan_inf(D_mh@A1@K2, replacement_value=0)
-    if sp.issparse(svd_kernel):
-        svd_kernel = sp.csr_matrix(svd_kernel)
-    # delete redundant kernels
-    if delete_kernels:
-        del A1
-        del K2
-        gc.collect()
-    # compute the EVD efficiently with SVD
-    vals, vecs = SVD_trick(svd_kernel, embed_dim=embed_dim, solver=solver)
-    vecs = D_mh@vecs  # convert to eigenvectors of D_inv@A1@K2@K2@A1.T
-    # sort components
-    if return_vecs:
-        return vals, vecs
-    else:
-        return np.real((vals[1:embed_dim + 1] ** t) * vecs[:, 1:embed_dim + 1])
-
-
 def ad_forward_backward(s1_ref=None, s1_full=None, s2_ref=None, embed_dim=2, t=1, A1=None, K2_ref=None, ffbb=False,
                         solver='arpack', delete_kernels=False, return_vecs=False):
     """"
@@ -685,10 +592,9 @@ def ad_forward_backward(s1_ref=None, s1_full=None, s2_ref=None, embed_dim=2, t=1
 def adm_plus(s1_ref=None, s1_full=None, s2_ref=None, embed_dim=2, t=1, A1=None, K2_ref=None, solver='arpack',
              delete_kernels=False, return_vecs=False):
     """"
-        computes forward-backward alternating diffusion map extension, extends the embedding
-        with missing measurements from the second view.
-        Important note: the order of all measurements must be aligned (s1_full[i,:], s1_ref[i,:] and s2_ref[i,:]
-        must all be aligned measurements)
+        computes ADM+ algorithm (our main proposed method).
+        Make sure that the order of all measurements must be aligned (s1_full[i,:], s1_ref[i,:] and s2_ref[i,:]
+        must all be aligned measurements for the first samples_ref samples)
 
         Inputs:
         s1_full - (samples_total, features) sensor 1 samples from the total set
@@ -709,6 +615,7 @@ def adm_plus(s1_ref=None, s1_full=None, s2_ref=None, embed_dim=2, t=1, A1=None, 
         A1, _, _ = Create_Asym_Tran_Kernel(s1_full, s1_ref)
         K2_ref, _ = Create_Transition_Mat(s2_ref)
 
+    # normalize kernels
     Q1_p = column_norm(A1)  # Q1^- N_R X N
     Q2_ref = column_norm(K2_ref)  # Q2_ref N_R X N_R
     Q = Q1_p @ Q2_ref
@@ -720,12 +627,49 @@ def adm_plus(s1_ref=None, s1_full=None, s2_ref=None, embed_dim=2, t=1, A1=None, 
     if sp.issparse(Q):
         Q = sp.csr_matrix(Q)
     Q = replace_nan_inf(Q)
-    vals, vecs = SVD_trick(Q, embed_dim, solver=solver)
+    vals, vecs = SVD_trick(Q, embed_dim, solver=solver, side='left')
     if return_vecs:
         return vals, vecs
     else:
         return np.real((vals[1:embed_dim + 1] ** t) * vecs[:, 1:embed_dim + 1])
 
+
+# ------------------------ Optimization Methods ---------------------------
+
+def fimvc_via_embed(s1_ref=None, s1_full=None, s2_ref=None, embed_dim=2, mu=1.0, max_iters=50, 
+                    normalize_rows=True, random_state=0, verbose=False):
+    """
+        Computes FIMVC embedding by using the FIMVC class
+        Inputs:
+        s1_full - (samples_total, features) sensor 1 samples from the total set
+        s1_ref - (samples_ref, features) sensor 1 samples from the reference set
+        s2_ref - (samples_ref, features) sensor 2 samples from the reference set
+        embed_dim - embedding dimension
+        return: embedding (samples, embed_dim)
+    """
+    n_anchors = s2_ref.shape[0]
+    config = FIMVCVIAConfig(
+        n_clusters=embed_dim,
+        n_anchors=n_anchors,
+        mu=mu,
+        max_iters=max_iters,
+        svd_rank=embed_dim,
+        normalize_rows=normalize_rows,
+        random_state=random_state,
+        verbose=verbose
+    )
+
+    # convert missing data to NaN format
+    s2_nan = np.zeros((s1_full.shape[0], s2_ref.shape[1]))  
+    s2_nan[:n_anchors, :] = s2_ref
+    s2_nan[n_anchors:, :] = np.nan  # mark missing data with NaN
+    # create FIMVC object and fit
+    model = FIMVC_VIA(config).fit([s1_full, s2_nan])
+    embedding = model.get_embedding()
+    return embedding
+
+
+# ------------------------------------ Wrapper Function ---------------------------------------
 
 def embed_wrapper(s1_ref=None, s1_full=None, s2_ref=None, s2_full=None, method="forward_only",
                   embed_dim=2, t=1, K1=None, K2=None, solver='arpack', delete_kernels=False,
@@ -762,10 +706,6 @@ def embed_wrapper(s1_ref=None, s1_full=None, s2_ref=None, s2_full=None, method="
         return ad_backward_only(s1_full, s1_ref, s2_ref, embed_dim=embed_dim, t=t,
                                A1=K1, K2=K2, fast_comp=True, solver=solver, delete_kernels=delete_kernels,
                                tol=tol, stabilize=stabilize, return_vecs=return_vecs)
-    if method == "forward_only_slow":
-        return ad_forward_only(s1_full, s1_ref, s2_ref, embed_dim=embed_dim, t=t,
-                               A1=K1, K2=K2, fast_comp=False, solver=solver, delete_kernels=delete_kernels,
-                               tol=tol, stabilize=stabilize, return_vecs=return_vecs)
     elif method == "ad":
         return alternating_diffusion(s1_full, s2_full, embed_dim=embed_dim, t=t,
                                      K1=K1, K2=K2, solver=solver, delete_kernels=delete_kernels, tol=tol,
@@ -774,10 +714,7 @@ def embed_wrapper(s1_ref=None, s1_full=None, s2_ref=None, s2_full=None, method="
         return alternating_diffusion(s1_full, s2_full, embed_dim=embed_dim, t=t,
                                      K1=K1, K2=K2, solver='svd', delete_kernels=delete_kernels, tol=tol,
                                      stabilize=stabilize, return_vecs=return_vecs)
-    elif method == "alternating_roseland":
-        return alternating_roseland(s1_ref, s1_full, s2_ref, embed_dim,
-                                    t=t, A1=K1, K2=K2, solver=solver, delete_kernels=delete_kernels)
-    elif method == "lead":
+    elif method == "lad":
         return LAD_embedding(s1_ref, s1_full, s2_ref, s2_full, dim=embed_dim,
                               t=t, A1=K1, A2=K2, solver=solver, delete_kernels=delete_kernels,
                               tol=tol, stabilize=stabilize, return_vecs=return_vecs)
@@ -799,14 +736,12 @@ def embed_wrapper(s1_ref=None, s1_full=None, s2_ref=None, s2_full=None, method="
     elif method == "nystrom":
         return nystrom_ad(s1_ref, s1_full, s2_ref, embed_dim, t=t, A1=K1, K2_ref=K2, return_vecs=return_vecs)
 
-    elif method == "kcca":
-        return kcca(s1_ref, s1_full, s2_ref, embed_dim=embed_dim, A1=K1, K2_ref=K2, return_vecs=return_vecs)
-
     elif method == "kcca_impute":
         return kcca_impute(s1_full, s2_ref, embed_dim=embed_dim, K1=K1, K2_ref=K2, return_vecs=return_vecs)
 
     elif method == "kcca_full":
         return kcca_full(s1_full, s2_full, embed_dim=embed_dim, K1=K1, K2=K2, return_vecs=return_vecs)
+    
     elif method == 'apmc':
         return apmc_embed(s1_ref, s1_full, s2_ref, embed_dim=embed_dim, A1=K1, K2_ref=K2, return_vecs=return_vecs,
                           solver=solver)

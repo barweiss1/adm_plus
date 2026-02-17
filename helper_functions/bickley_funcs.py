@@ -8,7 +8,7 @@ from deeptime.data import bickley_jet
 import matplotlib.pyplot as plt
 from matplotlib.cm import get_cmap
 import matplotlib.colors as mcolors
-from helper_functions.AD_funcs import embed_wrapper
+from helper_functions.embed_methods import embed_wrapper
 from deeptime.clustering import KMeans
 from sklearn.metrics import silhouette_score
 from helper_functions.clustering_funcs import align_clusters

@@ -10,7 +10,10 @@ from tqdm import tqdm
 from scipy.spatial.distance import cdist, pdist, squareform
 from scipy.io import loadmat
 from scipy.linalg import svd
-from helper_functions.AD_funcs import prep_kernels, alternating_diffusion, diffusion_map, embed_wrapper
+from helper_functions.embed_utils import prep_kernels
+from helper_functions.embed_methods import embed_wrapper
+from helper_functions.embed_methods import (OPT_METHODS, FULL_VIEW_DIFFUSION_METHODS, PARTIAL_VIEW_DIFFUSION_METHODS,
+                                            FULL_VIEW_KERNEL_METHODS, PARTIAL_VIEW_KERNEL_METHODS, SINGLE_VIEW_METHODS)
 from helper_functions.plotting_funcs import plot_embed, plot_embed_tsne
 from sklearn.svm import SVC
 from sklearn.metrics import accuracy_score, silhouette_score
@@ -188,58 +191,6 @@ def shuffle_indices_while_preserving_labels(batch_idx, task_labels):
 
     return shuffled_batch_idx
 
-# remove in final version
-def get_kernels_for_tasks(task_labels, i_task, j_task, embed_params, method, dist_mat_LR,
-                          dist_mat_RL=None, modalities='LR-RL', common_task_idx=None, plot_flag=False, k=None):
-    '''
-    :param task_labels: labels vector
-    :param i_task: 1st task index - the one we use to identify
-    :param j_task: 2nd task index - the one we need to identify
-    :param embed_params: embedding parameters
-    :param method: methods
-    :param dist_mat_LR:
-    :param dist_mat_RL:
-    :param modalities: which 2 modalities are used for alternating diffusion
-        LR-RL - LR and RL are the modalities
-        tasks - 2 tasks are used as the modalities, the first modality is a common task (specified by common_task_idx)
-         and the second modaility is a mixed task modality containing 2 different tasks (all possible permutations)
-    :param common_task_idx: index of the common task used in the modality (only used when modalities='tasks')
-    :return:
-    '''
-    task_i_idx = np.where(task_labels == i_task)[0]
-    task_j_idx = np.where(task_labels == j_task)[0]
-    task_idx = np.hstack((task_i_idx, task_j_idx))
-    task_mask = np.logical_or(task_labels == i_task, task_labels == j_task)
-    if modalities == 'LR-RL':
-        distance_mat1 = dist_mat_LR[task_idx, :][:, task_idx]
-        distance_mat2 = dist_mat_RL[task_idx, :][:, task_idx]
-    elif modalities == 'tasks':
-        distance_mat1 = dist_mat_LR[task_idx, :][:, task_labels == i_task]
-        distance_mat2 = dist_mat_LR[task_labels == common_task_idx, :][:, task_labels == common_task_idx]
-        if method == 'dm':
-            distance_mat1 = dist_mat_LR[task_idx, :][:, task_idx]
-        if method == 'ad':
-            distance_mat1 = dist_mat_LR[task_idx, :][:, task_idx]
-            task_common_idx = np.where(task_labels == common_task_idx)[0]
-            task_common_idx2 = np.where(task_labels == 7)[0]
-            task_common_idx_double = np.hstack((task_common_idx, task_common_idx2))
-            distance_mat2 = dist_mat_LR[task_common_idx_double, :][:, task_common_idx_double]
-    else:
-        raise ValueError(f'Unsupported modalities: {modalities}')
-    if plot_flag:
-        fig, ax = plt.subplots(1, 1)
-        ax.imshow(distance_mat1)
-        ax.set_title('distance mat 1')
-        fig, ax = plt.subplots(1, 1)
-        ax.imshow(distance_mat2)
-        ax.set_title('distance mat 2')
-    K1, K2 = prep_kernels(dist_mat1=distance_mat1, dist_mat2=distance_mat2,
-                          method=method, scale1=embed_params['kernel_scale1'], scale2=embed_params['kernel_scale2'],
-                          zero_diag=embed_params['zero_diag'], k=k)
-    # get task and subject labels for the current comparison
-    task_labels_current = task_labels[task_idx]
-    return task_labels_current, K1, K2
-
 
 def get_kernels_task_classification(data_LR, task_labels, batch_idx, Nr, N_val, embed_params, method, dist_mat_LR,
                           dist_mat_RL=None, modalities='LR-RL', plot_flag=False, k=None):
@@ -264,13 +215,12 @@ def get_kernels_task_classification(data_LR, task_labels, batch_idx, Nr, N_val, 
     if embed_params['shuffle_subjects']:
         shuffled_idx = shuffle_indices_while_preserving_labels(batch_idx, task_labels_batch)
     if modalities == 'LR-RL':
-        if method in {'dm', 'ad', 'ad_svd'}:
+        if method in SINGLE_VIEW_METHODS or method in (FULL_VIEW_DIFFUSION_METHODS - {'lad'}):
             distance_mat1 = dist_mat_LR[batch_idx, :][:, batch_idx]
             distance_mat1_val = dist_mat_LR[batch_idx[:Nr + N_val], :][:, batch_idx[:Nr + N_val]]
             distance_mat2 = dist_mat_RL[shuffled_idx, :][:, shuffled_idx]
             distance_mat2_val = dist_mat_RL[shuffled_idx[:Nr + N_val], :][:, shuffled_idx[:Nr + N_val]]
-        elif method in {'alternating_roseland', 'ffbb', 'fbfb', 'forward_only', 'ncca', 'kcca', 'nystrom',
-                        'adm_plus', 'backward_only', 'apmc'}:
+        elif method in PARTIAL_VIEW_DIFFUSION_METHODS or method in (PARTIAL_VIEW_KERNEL_METHODS - {"kcca_impute"}):
             distance_mat1 = dist_mat_LR[batch_idx, :][:, batch_idx[:Nr]]
             distance_mat1_val = dist_mat_LR[batch_idx[:Nr + N_val], :][:, batch_idx[:Nr]]
             distance_mat2 = dist_mat_RL[shuffled_idx[:Nr], :][:, shuffled_idx[:Nr]]
@@ -280,7 +230,7 @@ def get_kernels_task_classification(data_LR, task_labels, batch_idx, Nr, N_val, 
             distance_mat1_val = dist_mat_LR[batch_idx[:Nr + N_val], :][:, batch_idx[:Nr + N_val]]
             distance_mat2 = dist_mat_RL[shuffled_idx[:Nr], :][:, shuffled_idx[:Nr]]
             distance_mat2_val = dist_mat_RL[shuffled_idx[:Nr], :][:, shuffled_idx[:Nr]]
-        elif method == 'lead':
+        elif method == 'lad':
             distance_mat1 = dist_mat_LR[batch_idx, :][:, batch_idx[:Nr]]
             distance_mat1_val = dist_mat_LR[batch_idx[:Nr + N_val], :][:, batch_idx[:Nr]]
             distance_mat2 = dist_mat_RL[shuffled_idx, :][:, shuffled_idx[:Nr]]
@@ -288,13 +238,12 @@ def get_kernels_task_classification(data_LR, task_labels, batch_idx, Nr, N_val, 
         else:
             raise ValueError(f'Unsupported method: {method}')
     elif modalities == 'LR-LR':
-        if method in {'dm', 'ad', 'ad_svd'}:
+        if method in SINGLE_VIEW_METHODS or method in (FULL_VIEW_DIFFUSION_METHODS - {'lad'}):
             distance_mat1 = dist_mat_LR[batch_idx, :][:, batch_idx]
             distance_mat1_val = dist_mat_LR[batch_idx[:Nr + N_val], :][:, batch_idx[:Nr + N_val]]
             distance_mat2 = dist_mat_LR[shuffled_idx, :][:, shuffled_idx]
             distance_mat2_val = dist_mat_LR[shuffled_idx[:Nr + N_val], :][:, shuffled_idx[:Nr + N_val]]
-        elif method in {'alternating_roseland', 'ffbb', 'fbfb', 'forward_only', 'ncca', 'kcca', 'nystrom',
-                        'adm_plus', 'backward_only', 'apmc'}:
+        elif method in PARTIAL_VIEW_DIFFUSION_METHODS or method in (PARTIAL_VIEW_KERNEL_METHODS - {"kcca_impute"}):
             distance_mat1 = dist_mat_LR[batch_idx, :][:, batch_idx[:Nr]]
             distance_mat1_val = dist_mat_LR[batch_idx[:Nr + N_val], :][:, batch_idx[:Nr]]
             distance_mat2 = dist_mat_LR[shuffled_idx[:Nr], :][:, shuffled_idx[:Nr]]
@@ -304,7 +253,7 @@ def get_kernels_task_classification(data_LR, task_labels, batch_idx, Nr, N_val, 
             distance_mat1_val = dist_mat_LR[batch_idx[:Nr + N_val], :][:, batch_idx[:Nr + N_val]]
             distance_mat2 = dist_mat_LR[shuffled_idx[:Nr], :][:, shuffled_idx[:Nr]]
             distance_mat2_val = dist_mat_LR[shuffled_idx[:Nr], :][:, shuffled_idx[:Nr]]
-        elif method == 'lead':
+        elif method == 'lad':
             distance_mat1 = dist_mat_LR[batch_idx, :][:, batch_idx[:Nr]]
             distance_mat1_val = dist_mat_LR[batch_idx[:Nr + N_val], :][:, batch_idx[:Nr]]
             distance_mat2 = dist_mat_LR[shuffled_idx, :][:, shuffled_idx[:Nr]]
@@ -323,14 +272,13 @@ def get_kernels_task_classification(data_LR, task_labels, batch_idx, Nr, N_val, 
         for task_i in range(n_labels):
             data_means[task_i, :] = data_batch[labels_train == task_i, :].mean()
         dist_means = squareform(pdist(data_means, metric='euclidean'))
-        if method in {'dm', 'ad', 'ad_svd'}:
+        if method in SINGLE_VIEW_METHODS or method in (FULL_VIEW_DIFFUSION_METHODS - {'lad'}):
             distance_mat1 = dist_mat_LR[batch_idx, :][:, batch_idx]
             distance_mat2 = dist_means[task_labels_batch, :][:, task_labels_batch]
             # validation distance matrices
             distance_mat1_val = dist_mat_LR[batch_idx[:Nr + N_val], :][:, batch_idx[:Nr + N_val]]
             distance_mat2_val = dist_means[task_labels_batch[:Nr + N_val], :][:, task_labels_batch[:Nr + N_val]]
-        elif method in {'alternating_roseland', 'ffbb', 'fbfb', 'forward_only', 'ncca', 'nystrom', 'kcca',
-                        'adm_plus', 'backward_only', 'apmc'}:
+        elif method in PARTIAL_VIEW_DIFFUSION_METHODS or method in (PARTIAL_VIEW_KERNEL_METHODS - {"kcca_impute"}):
             distance_mat1 = dist_mat_LR[batch_idx, :][:, batch_idx[:Nr]]
             distance_mat2 = dist_means[task_labels_batch[:Nr], :][:, task_labels_batch[:Nr]]
             distance_mat1_val = dist_mat_LR[batch_idx[:Nr + N_val], :][:, batch_idx[:Nr]]
@@ -340,7 +288,7 @@ def get_kernels_task_classification(data_LR, task_labels, batch_idx, Nr, N_val, 
             distance_mat1_val = dist_mat_LR[batch_idx[:Nr + N_val], :][:, batch_idx[:Nr + N_val]]
             distance_mat2 = dist_means[shuffled_idx[:Nr], :][:, shuffled_idx[:Nr]]
             distance_mat2_val = dist_means[shuffled_idx[:Nr], :][:, shuffled_idx[:Nr]]
-        elif method == 'lead':
+        elif method == 'lad':
             distance_mat1 = dist_mat_LR[batch_idx, :][:, batch_idx[:Nr]]
             distance_mat2 = dist_means[task_labels_batch, :][:, task_labels_batch[:Nr]]
             distance_mat1_val = dist_mat_LR[batch_idx[:Nr + N_val], :][:, batch_idx[:Nr]]
@@ -363,113 +311,6 @@ def get_kernels_task_classification(data_LR, task_labels, batch_idx, Nr, N_val, 
                           method=method, scale1=embed_params['kernel_scale1'], scale2=embed_params['kernel_scale2'],
                           zero_diag=embed_params['zero_diag'], k=k)
     return task_labels_batch, K1, K2, K1_val, K2_val
-
-
-# remove in final version
-def cross_task_fingerprint(data_LR, data_RL=None, method='single', dist_mats=None, metric='euclidean',
-                           embed_params=None, sim_params=None):
-    '''
-    run cross task fingerprinting analysis
-    :param data_LR: data n_edges x n_subjects x n_tasks - LR scan pattern FCN data
-    :param data_RL: data n_edges x n_subjects x n_tasks - RL scan pattern FCN data
-    :param method: method for analysis
-        single - use single LR scan and calculate distances based on it to determine the subject
-        dm - use diffusion maps embedding to calculate distances
-        ad - use alternating diffusion map embedding to calculate distances
-    :param dist_mat: dictionary with the distance matrices between the LR scan and RL scans
-    :param metric: metric for dist_mat if not provided - euclidean or affine_invariant
-    :param embed_params: dictionary containing the parameters for the embedding method
-    :param modalities: which 2 modalities are used for alternating diffusion
-        LR-RL - LR and RL are the modalities
-        tasks - 2 tasks are used as the modalities, the first modality is a common task (specified by common_task_idx)
-         and the second modaility is a mixed task modality containing 2 different tasks (all possible permutations)
-    :param common_task_idx: index of the common task used in the modality (only used when modalities='tasks')
-    :param sim_params: simulation parameters
-    :return: acc_mat: cross task fingerprinting accuracy matrix
-    '''
-    # get distance matrix
-    if dist_mats is None:
-        dist_mat_LR, dist_mat_RL, task_labels, subject_labels = calculate_distances(data_LR, data_RL, metric=metric)
-        dist_mats = dict()
-        dist_mats['LR'] = dist_mat_LR
-        dist_mats['RL'] = dist_mat_RL
-        dist_mats['task_labels'] = task_labels
-        dist_mats['subject_labels'] = subject_labels
-    else:
-        dist_mat_LR = dist_mats['LR']
-        dist_mat_RL = dist_mats['RL']
-        task_labels = dist_mats['task_labels']
-        subject_labels = dist_mats['subject_labels']
-
-    # cross all tasks and identify subjects
-    n_subjects = data_LR.shape[1]
-    n_tasks = data_LR.shape[2]
-    # choose modalities for AD algorithm
-    modalities = embed_params['modalities']
-    common_task_idx = embed_params['common_task_idx']
-    if modalities == 'LR-RL':
-        acc_mat = np.ones((n_tasks, n_tasks))
-        tasks = np.arange(n_tasks)
-    elif modalities == 'tasks':
-        acc_mat = np.ones((n_tasks, n_tasks))
-        tasks = np.arange(n_tasks)
-        tasks = tasks[tasks != common_task_idx]
-    else:
-        raise ValueError(f'Unsupported modalities: {modalities}')
-    # go over tasks and compare fingerprinting accuracy
-    for i_task in tasks:
-        for j_task in tasks:
-            if i_task != j_task:
-                if method == 'single':
-                    distance_mat = dist_mat_LR[task_labels == i_task, :][:, task_labels == j_task]
-                    subject_est = np.argmin(distance_mat, axis=0)
-                    acc_mat[i_task, j_task] = np.sum(subject_est == np.arange(n_subjects)) / n_subjects
-                elif method == 'ad':
-                    task_labels_current, K1, K2 = get_kernels_for_tasks(task_labels, i_task, j_task, embed_params,
-                                                                        method, dist_mat_LR, dist_mat_RL,
-                                                                        modalities=modalities,
-                                                                        common_task_idx=common_task_idx,
-                                                                        plot_flag=sim_params['debug_plot'],
-                                                                        k=embed_params['kernel_sparsity'])
-                    embed = alternating_diffusion(embed_dim=embed_params['embed_dim'], t=embed_params['t'], K1=K1,
-                                                  K2=K2, stabilize=embed_params['stabilize'],
-                                                  tol=embed_params['eig_tol'])
-                    # calculate embedding distance between subjects in task
-                    embed_dist = cdist(embed[task_labels_current == i_task, :], embed[task_labels_current == j_task, :])
-                    subject_est = np.argmin(embed_dist, axis=0)
-                    acc_mat[i_task, j_task] = np.sum(subject_est == np.arange(n_subjects)) / n_subjects
-                elif method == "dm":
-                    task_labels_current, K1, K2 = get_kernels_for_tasks(task_labels, i_task, j_task, embed_params,
-                                                                        method, dist_mat_LR, dist_mat_RL,
-                                                                        modalities=modalities,
-                                                                        common_task_idx=common_task_idx,
-                                                                        plot_flag=sim_params['debug_plot'],
-                                                                        k=embed_params['kernel_sparsity'])
-                    embed = diffusion_map(embed_dim=embed_params['embed_dim'], t=embed_params['t'], K=K1,
-                                          stabilize=embed_params['stabilize'], tol=embed_params['eig_tol'])
-                    # calculate embedding distance between subjects in task
-                    embed_dist = cdist(embed[task_labels_current == i_task, :], embed[task_labels_current == j_task, :])
-                    subject_est = np.argmin(embed_dist, axis=0)
-                    acc_mat[i_task, j_task] = np.sum(subject_est == np.arange(n_subjects)) / n_subjects
-                elif method in {'alternating_roseland', 'ffbb', 'fbfb', 'forward_only', 'ncca', 'kcca', 'kcca_impute',
-                                'nystrom', 'adm_plus', 'backward_only', 'apmc'}:
-                    task_labels_current, K1, K2 = get_kernels_for_tasks(task_labels, i_task, j_task, embed_params,
-                                                                        method, dist_mat_LR, dist_mat_RL,
-                                                                        modalities=modalities,
-                                                                        common_task_idx=common_task_idx,
-                                                                        plot_flag=sim_params['debug_plot'],
-                                                                        k=embed_params['kernel_sparsity'])
-                    embed = embed_wrapper(method=method, embed_dim=embed_params['embed_dim'], t=embed_params['t'],
-                                          K1=K1, K2=K2, solver=embed_params['evd_solver'],
-                                          delete_kernels=embed_params['delete_kernels'], tol=embed_params['eig_tol'],
-                                          stabilize=embed_params['stabilize'])
-                    # calculate embedding distance between subjects in task
-                    embed_dist = cdist(embed[task_labels_current == i_task, :], embed[task_labels_current == j_task, :])
-                    subject_est = np.argmin(embed_dist, axis=0)
-                    acc_mat[i_task, j_task] = np.sum(subject_est == np.arange(n_subjects)) / n_subjects
-                else:
-                    print(f'still need to implement method {method}')
-    return acc_mat[tasks, :][:, tasks], dist_mats
 
 
 def get_random_batches_indices(array, batch_size, seed=0):
@@ -617,7 +458,7 @@ def task_classification(data_LR, data_RL=None, method='single', dist_mats=None, 
                 results.append(new_line)
             else:
                 # create results directory
-                t_list = [0] if method in {'ncca', 'kcca', 'kcca_impute', 'apmc'} else embed_params['t_list']
+                t_list = [0] if method in PARTIAL_VIEW_KERNEL_METHODS.union(FULL_VIEW_KERNEL_METHODS) else embed_params['t_list']
                 results_dir = (
                     f'{sim_params["figures_path"]}/batch_{i}_method_{method}_s1_{embed_params["kernel_scale1"]}_'
                     f's2_{embed_params["kernel_scale2"]}_train_percent_{train_percent}').replace('.', 'p')
@@ -648,7 +489,7 @@ def task_classification(data_LR, data_RL=None, method='single', dist_mats=None, 
                 # calculate embedding for different embedding dimensions and t values efficiently
                 for t in t_list:
                     for dim in embed_params['embed_dims']:
-                        if method in {'ncca', 'kcca', 'kcca_impute'}:
+                        if method in PARTIAL_VIEW_KERNEL_METHODS:
                             embed = vecs[:, :dim]
                             embed_val = vecs_val[:, :dim]
                         else:

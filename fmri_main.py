@@ -9,8 +9,7 @@ import os
 from tqdm import tqdm
 from scipy.spatial.distance import cdist, pdist, squareform
 from scipy.io import loadmat
-from helper_functions.fmri_funcs import (cross_task_fingerprint, load_data,
-                                         calculate_distances, task_classification)
+from helper_functions.fmri_funcs import (load_data, calculate_distances, task_classification)
 
 
 def my_save_csv(df, base_filename, sim_params):
