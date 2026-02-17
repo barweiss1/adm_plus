@@ -205,7 +205,7 @@ if __name__ == '__main__':
         if args.task_id == 0:
             merge_csvs(sim_params)
     else:
-        run_simulation(args.task_id, args.n_tasks, sim_params)
+        run_simulation(args, sim_params)
     if args.task_id == 0:
         with open(f"{sim_params['figures_path']}/sim_params.json", 'w') as fp:
             json.dump(sim_params, fp, indent=4)
