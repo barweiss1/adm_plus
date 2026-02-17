@@ -541,7 +541,7 @@ def task_classification(data_LR, data_RL=None, method='single', dist_mats=None, 
                     (task_labels_batch, view1, view2, view1_val, 
                      view2_val) = get_features_task_classification(data_LR, data_RL, task_labels, 
                                                                    batch_idx, Nr, N_val, 
-                                                                   embed_params, method, 
+                                                                   embed_params, 
                                                                    modalities=modalities)
                     
                     # embed with desired method, embed to max dim to save computation time 
