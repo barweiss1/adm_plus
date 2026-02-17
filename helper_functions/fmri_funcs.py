@@ -549,18 +549,18 @@ def task_classification(data_LR, data_RL=None, method='single', dist_mats=None, 
                     embed_dim = max(embed_params['embed_dims'])
                     start_time = time()
                     if method == 'fimvc_via':
-                        vecs, vals = fimvc_via_embed(s1_full=view1, s2_ref=view2, embed_dim=embed_dim, 
+                        embed_full = fimvc_via_embed(s1_full=view1, s2_ref=view2, embed_dim=embed_dim, 
                                                      mu=embed_params['param1'])
                         run_time = time() - start_time
-                        vecs_val, vals_val = fimvc_via_embed(s1_full=view1_val, s2_ref=view2_val, 
+                        embed_full_val = fimvc_via_embed(s1_full=view1_val, s2_ref=view2_val, 
                                                              embed_dim=embed_dim,
                                                              mu=embed_params['param1'])
                     else:
                         raise ValueError(f"Unsupported optimization method: {method}")
                     
                     for dim in embed_params['embed_dims']:
-                        embed = vecs[:, :dim]
-                        embed_val = vecs_val[:, :dim]
+                        embed = embed_full[:, :dim]
+                        embed_val = embed_full_val[:, :dim]
                         new_line = evaluate_sample(embed, embed_val, Nr, N_val, task_labels_batch, 
                                                    embed_params, method, dim, t=0.0, train_percent=train_percent,
                                                    sim_params=sim_params, batch_index=i, seed=seed,
