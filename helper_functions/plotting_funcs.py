@@ -1,15 +1,17 @@
-# %% import
+#  import
 import matplotlib as mpl
 import matplotlib.pyplot as plt
 from matplotlib.ticker import MultipleLocator,FormatStrFormatter,MaxNLocator
+from sklearn.manifold import TSNE
+import numpy as np
 
-# %% set global parameters
+# set global parameters
 
 mpl.rcParams['pdf.fonttype'] = 42
 mpl.rcParams['ps.fonttype'] = 42
 mpl.rcParams['font.family'] = 'Arial'
 
-# %% create fig
+# create fig
 # fig = plt.figure(figsize=(10,6)) # units are inch
 # ax = plt.axes((0.1,0.1,0.5,0.8))
 # ax.spines['right'].set_visible(False)
@@ -64,3 +66,110 @@ def subplots_plot(nrows, ncols, figsize=(8, 4)):
 
     return fig, ax
 
+
+# plot 3D embedding
+def plot_3d_embed(embed, figsize=(8, 8), title=None, colors='b'):
+    fig = plt.figure(figsize=figsize)
+    ax = fig.add_subplot(111, projection='3d')
+    ax.scatter(embed[:, 0], embed[:, 1], embed[:, 2], marker='.', c=colors)
+    if title is not None:
+        ax.set_title(title)
+    ax.set_xlabel("First Diffusion Coordinate")
+    ax.set_ylabel("Second Diffusion Coordinate")
+    ax.set_zlabel("Third Diffusion Coordinate")
+    ax.set_box_aspect([1, 1, 1])  # Aspect ratio is 1:1:1
+    return fig, ax
+
+
+# plot 2D embedding
+def plot_2d_embed(embed, figsize=(8, 8), title='', colors='b', ref_indicator=None):
+    fig, ax = subplots_plot(1, 1, figsize=figsize)
+    if ref_indicator is None:
+        ax.scatter(embed[:, 0], embed[:, 1], marker='o', s=15, c=colors)
+    else:
+        ax.scatter(embed[ref_indicator == 0, 0], embed[ref_indicator == 0, 1],
+                   marker='^', s=15, c=colors[ref_indicator == 0])
+        ax.scatter(embed[ref_indicator == 1, 0], embed[ref_indicator == 1, 1],
+                   marker='o', s=15, c=colors[ref_indicator == 1])
+    if title is not None:
+        ax.set_title(title)
+    ax.set_xlabel("First Diffusion Coordinate")
+    ax.set_ylabel("Second Diffusion Coordinate")
+    ax.set_aspect('equal')
+    return fig, ax
+
+
+# wrapper function that calls 2d or 3d plot based on embedding dimension
+def plot_embed(embed, figsize=(8, 8), title='', colors='b', ref_indicator=None):
+    embed_dim = embed.shape[1]
+    if embed_dim == 2:
+        return plot_2d_embed(embed, figsize=figsize, title=title, colors=colors, ref_indicator=ref_indicator)
+    elif embed_dim == 3:
+        return plot_3d_embed(embed, figsize=figsize, title=title, colors=colors)
+    else:
+        print("Invalid Embedding Dimension for Plot")
+        return None, None
+
+
+def plot_embed_tsne(embedding, perplexity=30, n_iter=1000, random_state=42, title=None, colors='b', ref_indicator=None,
+                    color_labels=None, cmap='Dark2', figsize=(8, 7), show_legend=True, point_size=15, fontsize=24,
+                    font_properties=None):
+    """
+    Visualizes high-dimensional data in 2D using t-SNE.
+
+    Parameters:
+    - embedding: numpy array or similar, shape (n_samples, n_features)
+        High-dimensional data to be visualized.
+    - perplexity: float, optional (default: 30)
+        The perplexity is related to the number of nearest neighbors that is used in other manifold learning algorithms.
+    - n_iter: int, optional (default: 1000)
+        Number of iterations for optimization.
+    - random_state: int, optional (default: 42)
+        Random state for reproducibility.
+    - color_labels: list of strings, optional
+        Labels for each color in the colorbar.
+
+    Returns:
+    - None: The function displays the t-SNE plot.
+    """
+    tsne = TSNE(n_components=2, perplexity=perplexity, n_iter=n_iter, random_state=random_state)
+    tsne_results = tsne.fit_transform(embedding)
+
+    fig, ax = plt.subplots(figsize=figsize)
+
+    # Scatter plot
+    if ref_indicator is None:
+        scatter = ax.scatter(tsne_results[:, 0], tsne_results[:, 1], s=point_size, c=colors, cmap=cmap, marker='.')
+    else:
+        scatter = ax.scatter(tsne_results[ref_indicator == 0, 0], tsne_results[ref_indicator == 0, 1], s=point_size,
+                             c=colors[ref_indicator == 0], cmap=cmap, marker='.', label='out of reference')
+        ax.scatter(tsne_results[ref_indicator == 1, 0], tsne_results[ref_indicator == 1, 1], s=2*point_size,
+                   c=colors[ref_indicator == 1], cmap=cmap, marker='x', label='reference')
+
+    # Set titles and labels
+    if title is not None:
+        ax.set_title(f't-SNE {title}')
+    ax.tick_params(axis='x', labelsize=fontsize)
+    ax.tick_params(axis='y', labelsize=fontsize)
+    if font_properties is not None:
+        plt.xticks(fontsize=fontsize, fontproperties=font_properties)  # Increase x-tick fontsize
+        plt.yticks(fontsize=fontsize, fontproperties=font_properties)  # Increase y-tick fontsize
+        plt.xlabel('t-SNE Dimension 1', fontsize=fontsize, fontproperties=font_properties)
+        plt.ylabel('t-SNE Dimension 2', fontsize=fontsize, fontproperties=font_properties)
+    else:
+        ax.set_xlabel('t-SNE Dimension 1')
+        ax.set_ylabel('t-SNE Dimension 2')
+    # Adding colorbar with labels
+    if color_labels is not None:
+        cbar = plt.colorbar(scatter, ax=ax)
+        cbar.set_ticks(np.linspace(0, len(color_labels) - 1.9, len(color_labels)) + 0.5)
+        cbar.set_ticklabels(color_labels, fontproperties=font_properties)
+
+    # Customizing legend
+    if show_legend:
+        legend = ax.legend()
+        for handle in legend.legendHandles:
+            handle.set_facecolor('black')  # Set the facecolor to black
+            handle.set_edgecolor('black')  # Set the edgecolor to black
+
+    return fig, ax

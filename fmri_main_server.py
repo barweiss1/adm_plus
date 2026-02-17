@@ -46,19 +46,70 @@ def load_simulation_params():
         # 'methods': ['nystrom', 'ncca', 'kcca', 'kcca_impute', 'ad', 'dm', 'ffbb', 'fbfb', 'forward_only'],
         'methods': ['adm_plus', 'backward_only', 'nystrom', 'ncca', 'kcca', 'kcca_impute', 'ad', 'dm',
                     'apmc', 'forward_only'],
+        'opt_methods': ['fimvc_via'],  # optimization methods with different parameters
         'unify_rest': True,
         'embed_dims': [5, 10, 15, 20, 30, 40, 50, 60, 70, 80, 90, 100],
         't_list': [0.1, 0.2, 0.3, 0.5, 1, 2],
         'kernel_scales1': [0.1, 0.5, 1, 2, 10],
         'kernel_scales2': [0.5],
         'same_scales': True,
+        'mu_list': [0.001, 0.01, 0.1, 1.0, 10.0, 100.0],  # regularization parameters for FIMVC-VIA
         'train_percents': [0.05, 0.1, 0.15, 0.2, 0.3, 0.5, 0.7],
         'val_percent': 0.1  # validation set percentage
     }
     return sim_params
 
 
-def run_simulation(task_id, n_tasks, sim_params):
+def run_embed_method(LR_smooth, RL_smooth, dist_mats_euclidean, kernel_scale1, kernel_scale2,
+                      method, train_percent, sim_params):
+    # set same scale if required
+    if sim_params['same_scales']:
+        scale2 = kernel_scale1
+    else:
+        scale2 = kernel_scale2
+    embed_params = {
+        'embed_dims': sim_params['embed_dims'],
+        'common_task_idx': 1,
+        'kernel_sparsity': None,
+        'delete_kernels': True,
+        't_list': sim_params['t_list'],
+        'param1': kernel_scale1,
+        'param2': scale2,
+        'stabilize': False,
+        'shuffle_subjects': True,
+        'eig_tol': 0,
+        'classifier': 'knn',
+        'zero_diag': False,
+        'evd_solver': 'arpack',  # 'arpack' / 'randomized'
+        'subtract_min': False,
+    }
+    # task classification
+    results_df = task_classification(LR_smooth, RL_smooth, method=method, dist_mats=dist_mats_euclidean,
+                                        metric='euclidean', embed_params=embed_params,
+                                        sim_params=sim_params, train_percent=train_percent)
+    return results_df
+
+def run_opt_method(LR_smooth, RL_smooth, dist_mats_euclidean, mu, 
+                   method, train_percent, sim_params):
+    embed_params = {
+        'embed_dims': sim_params['embed_dims'],
+        'common_task_idx': 1,
+        'kernel_sparsity': None,
+        'delete_kernels': True,
+        'param1': mu,
+        'param2': None,
+        'shuffle_subjects': True,
+        'classifier': 'knn',
+        'zero_diag': False,
+    }
+    # task classification
+    results_df = task_classification(LR_smooth, RL_smooth, method=method, dist_mats=dist_mats_euclidean,
+                                        metric='euclidean', embed_params=embed_params,
+                                        sim_params=sim_params, train_percent=train_percent)
+    return results_df
+
+
+def run_simulation(args, sim_params):
     start_time = time()
     data_path = sim_params['data_path']
     figures_path = sim_params['figures_path']
@@ -96,38 +147,26 @@ def run_simulation(task_id, n_tasks, sim_params):
                 for kernel_scale1 in kernel_scales1:
                     # if job isn't assigned to task_id continue
                     job_num += 1
-                    if not job_num % n_tasks == task_id:
+                    if not job_num % args.n_tasks == args.task_id:
                         continue
-                    # set same scale if required
-                    if sim_params['same_scales']:
-                        scale2 = kernel_scale1
-                    else:
-                        scale2 = kernel_scale2
-                    embed_params = {
-                        'embed_dims': sim_params['embed_dims'],
-                        'common_task_idx': 1,
-                        'kernel_sparsity': None,
-                        'delete_kernels': True,
-                        't_list': sim_params['t_list'],
-                        'kernel_scale1': kernel_scale1,
-                        'kernel_scale2': scale2,
-                        'stabilize': False,
-                        'shuffle_subjects': True,
-                        'eig_tol': 0,
-                        'classifier': 'knn',
-                        'zero_diag': False,
-                        'evd_solver': 'arpack',  # 'arpack' / 'randomized'
-                        'subtract_min': False,
-                    }
-                    # task classification
-                    results_df = task_classification(LR_smooth, RL_smooth, method=method, dist_mats=dist_mats_euclidean,
-                                                     metric='euclidean', embed_params=embed_params,
-                                                     sim_params=sim_params, train_percent=train_percent)
+                    results_df = run_embed_method(LR_smooth, RL_smooth, dist_mats_euclidean, 
+                                                   kernel_scale1, kernel_scale2, method, 
+                                                   train_percent, sim_params)
                     result_dfs.append(results_df)
+    
+    # run optimization methods if required
+    if args.run_opt_methods:
+        for opt_method in sim_params['opt_methods']:
+            for train_percent in train_percents:
+                for mu in sim_params['mu_list']:
+                    results_df = run_opt_method(LR_smooth, RL_smooth, dist_mats_euclidean,
+                                                None, None, opt_method, None, sim_params)
+                    result_dfs.append(results_df)
+        
     results_all_df = pd.concat(result_dfs)
     os.makedirs(f'{figures_path}/machine_output', exist_ok=True)
-    my_save_csv(results_all_df, f'{figures_path}/machine_output/machine_{task_id}', sim_params)
-    print(f"Total Simulation Time for task_id {task_id}: {time() - start_time:.2f} seconds")
+    my_save_csv(results_all_df, f'{figures_path}/machine_output/machine_{args.task_id}', sim_params)
+    print(f"Total Simulation Time for task_id {args.task_id}: {time() - start_time:.2f} seconds")
     return results_all_df
 
 

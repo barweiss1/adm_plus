@@ -1,4 +1,5 @@
 import os
+from time import time
 
 import matplotlib.pyplot as plt
 import math
@@ -11,7 +12,7 @@ from scipy.spatial.distance import cdist, pdist, squareform
 from scipy.io import loadmat
 from scipy.linalg import svd
 from helper_functions.embed_utils import prep_kernels
-from helper_functions.embed_methods import embed_wrapper
+from helper_functions.embed_methods import embed_wrapper, fimvc_via_embed
 from helper_functions.embed_methods import (OPT_METHODS, FULL_VIEW_DIFFUSION_METHODS, PARTIAL_VIEW_DIFFUSION_METHODS,
                                             FULL_VIEW_KERNEL_METHODS, PARTIAL_VIEW_KERNEL_METHODS, SINGLE_VIEW_METHODS)
 from helper_functions.plotting_funcs import plot_embed, plot_embed_tsne
@@ -20,6 +21,8 @@ from sklearn.metrics import accuracy_score, silhouette_score
 from sklearn.neighbors import KNeighborsClassifier
 from collections import Counter
 
+
+# ---------------- Data loading and pre-processing functions ----------------
 
 def load_data(data_path, data_type='smooth'):
     if data_type == 'smooth':
@@ -169,6 +172,8 @@ def calculate_distances(data_LR, data_RL, metric='euclidean', reg=False, diag_fi
     return dist_mat_LR, dist_mat_RL, task_labels, subject_labels
 
 
+# ------------------- Kernel preparation functions -------------------
+
 def shuffle_indices_while_preserving_labels(batch_idx, task_labels):
     # Ensure that batch_idx and task_labels have the same length
     assert len(batch_idx) == len(task_labels), "batch_idx and task_labels must have the same length"
@@ -191,9 +196,30 @@ def shuffle_indices_while_preserving_labels(batch_idx, task_labels):
 
     return shuffled_batch_idx
 
+def get_features_task_classification(data_LR, data_RL, task_labels, batch_idx, Nr, 
+                                     N_val, embed_params, modalities='LR-LR'):
+    """
+    divide data to train, val and test for optimization methods
+    """
+    stacked_data_LR, _, _, _ = prepare_data(data_LR, data_RL)
+    shuffled_idx = batch_idx
+    # get task and subject labels for the current comparison
+    task_labels_batch = task_labels[batch_idx]
+    if embed_params['shuffle_subjects']:
+        shuffled_idx = shuffle_indices_while_preserving_labels(batch_idx, task_labels_batch)
+    if modalities == 'LR-LR':
+        view1 = stacked_data_LR[batch_idx, :]
+        view1_val = stacked_data_LR[batch_idx[:Nr + N_val], :]
+        view2 = stacked_data_LR[shuffled_idx[:Nr], :]
+        view2_val = stacked_data_LR[shuffled_idx[:Nr], :]
+    else:
+        raise ValueError(f'Unsupported modalities: {modalities}')
+    return task_labels_batch, view1, view2, view1_val, view2_val
 
-def get_kernels_task_classification(data_LR, task_labels, batch_idx, Nr, N_val, embed_params, method, dist_mat_LR,
-                          dist_mat_RL=None, modalities='LR-RL', plot_flag=False, k=None):
+
+def get_kernels_task_classification(data_LR, task_labels, batch_idx, Nr, N_val, embed_params, method, 
+                                    dist_mat_LR, dist_mat_RL=None, modalities='LR-LR', 
+                                    plot_flag=False, k=None):
     '''
     :param task_labels: labels vector
     :param i_task: 1st task index - the one we use to identify
@@ -305,10 +331,10 @@ def get_kernels_task_classification(data_LR, task_labels, batch_idx, Nr, N_val, 
         ax.imshow(distance_mat2)
         ax.set_title('distance mat 2')
     K1, K2 = prep_kernels(dist_mat1=distance_mat1, dist_mat2=distance_mat2,
-                          method=method, scale1=embed_params['kernel_scale1'], scale2=embed_params['kernel_scale2'],
+                          method=method, scale1=embed_params['param1'], scale2=embed_params['param2'],
                           zero_diag=embed_params['zero_diag'], k=k)
     K1_val, K2_val = prep_kernels(dist_mat1=distance_mat1_val, dist_mat2=distance_mat2_val,
-                          method=method, scale1=embed_params['kernel_scale1'], scale2=embed_params['kernel_scale2'],
+                          method=method, scale1=embed_params['param1'], scale2=embed_params['param2'],
                           zero_diag=embed_params['zero_diag'], k=k)
     return task_labels_batch, K1, K2, K1_val, K2_val
 
@@ -333,6 +359,7 @@ def get_random_batches_indices(array, batch_size, seed=0):
 
     return batches_idx
 
+# ---------------- Classification and evaluation functions ----------------
 
 # fit classification model and return predicted labels on test data
 def fit_and_classify(train_data, test_data, train_labels, embed_params):
@@ -371,6 +398,49 @@ def calc_accuracy(embed, embed_val, Nr, N_val, task_labels_batch, embed_params):
     return acc_val, acc_test, silhouette_pred
 
 
+def evaluate_sample(embed, embed_val, Nr, N_val, task_labels_batch, embed_params, 
+                    method, dim, t, train_percent, sim_params, batch_index, seed,
+                    run_time, results_dir):
+    """
+        Compute evaluation metrics for a single sample.
+        plot visualization of the embedding if specified in sim_params.
+    """
+    acc_val, acc_test, silhouette_pred = calc_accuracy(embed=embed, embed_val=embed_val, Nr=Nr,
+                                                       N_val=N_val, 
+                                                       task_labels_batch=task_labels_batch, 
+                                                       embed_params=embed_params)
+    new_line = {
+        'method': method,
+        'param1': embed_params['param1'],
+        'param2': embed_params['param2'],
+        'dim': dim,
+        't': t,
+        'train_percent': train_percent,
+        'batch_size': sim_params['batch_size'],
+        'batch': batch_index,
+        'seed': seed,
+        'zero_diag': embed_params['zero_diag'],
+        'classifier': embed_params['classifier'],
+        'shuffle_subjects': embed_params['shuffle_subjects'],
+        'valid_accuracy': acc_val,
+        'test_accuracy': acc_test,
+        'silhouette_gt': silhouette_score(embed, task_labels_batch),
+        'silhouette_pred_test': silhouette_pred,
+        'run_time': run_time
+    }
+    if sim_params['save_format'] == 'plot':
+        ref_indicator = np.hstack((np.ones(Nr), np.zeros(N - Nr)))
+        # plot_embed(embed[:, :2], title=f'batch_{i}_method_{method}_acc_{acc}',
+        #            colors=task_labels_batch, ref_indicator=ref_indicator)
+        title_str = f'{results_dir}/t_{t}_dim_{dim}'
+        # plt.savefig(f'{title_str}.pdf', dpi=300, format='pdf')
+        plot_embed_tsne(embed, title=f'batch_{batch_index}_method_{method}_acc_{acc_test}',
+                        colors=task_labels_batch, ref_indicator=ref_indicator,
+                        color_labels=sim_params['tasks_list'])
+        plt.savefig(f'{title_str}_tsne_seed_{seed}.pdf', dpi=300, format='pdf')
+    return new_line
+
+
 def dist_mat_knn(distance_matrix_train_test, labels_train, k=5):
     num_test_samples = distance_matrix_train_test.shape[1]
     labels_pred = []
@@ -393,6 +463,8 @@ def dist_mat_knn(distance_matrix_train_test, labels_train, k=5):
 
     return np.array(labels_pred)
 
+
+# ------------------------ Main Function that runs the experiment pipeline -------------------------
 
 def task_classification(data_LR, data_RL=None, method='single', dist_mats=None, metric='euclidean',
                         embed_params=None, sim_params=None, train_percent=0.8):
@@ -441,10 +513,10 @@ def task_classification(data_LR, data_RL=None, method='single', dist_mats=None, 
                 labels_pred = dist_mat_knn(dist_mat, labels_train)
                 new_line = {
                     'method': method,
-                    'kernel_scale1': embed_params['kernel_scale1'],
-                    'kernel_scale2': embed_params['kernel_scale2'],
-                    'dim': 'N/a',
-                    't': 'N/a',
+                    'param1': 0.0,
+                    'param2': 0.0,
+                    'dim': 0.0,
+                    't': 0.0,
                     'train_percent': train_percent,
                     'batch_size': sim_params['batch_size'],
                     'batch': i,
@@ -456,12 +528,64 @@ def task_classification(data_LR, data_RL=None, method='single', dist_mats=None, 
                     'accuracy': accuracy_score(labels_test, labels_pred)
                 }
                 results.append(new_line)
+            elif method in OPT_METHODS:
+                results_dir = (
+                    f'{sim_params["figures_path"]}/batch_{i}_method_{method}_mu_{embed_params["param1"]}_'
+                    f'train_percent_{train_percent}').replace('.', 'p')
+                os.makedirs(results_dir, exist_ok=True)
+                path = f"{results_dir}/data_seed_{seed}"
+                if not sim_params['overwrite'] and os.path.isfile(f"{path}.pkl"):
+                    vecs, vals, vecs_val, vals_val, task_labels_batch = load_data_from_pkl(path)
+                else:
+                    # optmization methods work with features and not kernels
+                    (task_labels_batch, view1, view2, view1_val, 
+                     view2_val) = get_features_task_classification(data_LR, data_RL, task_labels, 
+                                                                   batch_idx, Nr, N_val, 
+                                                                   embed_params, method, 
+                                                                   modalities=modalities)
+                    
+                    # embed with desired method, embed to max dim to save computation time 
+                    # and then calculate accuracy for different embedding dimensions by truncating the embedding
+                    embed_dim = max(embed_params['embed_dims'])
+                    start_time = time()
+                    if method == 'fimvc_via':
+                        vecs, vals = fimvc_via_embed(view1, view2, embed_dim=embed_dim, 
+                                                     mu=embed_params['param1'])
+                        run_time = time() - start_time
+                        vecs_val, vals_val = fimvc_via_embed(view1_val, view2_val, 
+                                                             embed_dim=embed_dim,
+                                                             mu=embed_params['param1'])
+                    else:
+                        raise ValueError(f"Unsupported optimization method: {method}")
+                    
+                    for dim in embed_params['embed_dims']:
+                        embed = vecs[:, :dim]
+                        embed_val = vecs_val[:, :dim]
+                        new_line = evaluate_sample(embed, embed_val, Nr, N_val, task_labels_batch, 
+                                                   embed_params, method, dim, t=0.0, train_percent=train_percent,
+                                                   sim_params=sim_params, batch_index=i, seed=seed,
+                                                   results_dir=results_dir, run_time=run_time)
+                        results.append(new_line)
+                    if sim_params['save_format'] == 'data':
+                        embed_dict = dict()
+                        embed_dict['vecs'] = vecs
+                        embed_dict['vals'] = vals
+                        embed_dict['vecs_val'] = vecs_val
+                        embed_dict['vals_val'] = vals_val
+                        embed_dict['df'] = results
+                        embed_dict['ref_indicator'] = np.hstack((np.ones(Nr), np.zeros(N - Nr)))
+                        embed_dict['labels_batch'] = task_labels_batch
+                        embed_dict['tasks_list'] = sim_params['tasks_list']
+                        with open(f"{results_dir}/data_seed_{seed}.pkl", 'wb') as fp:
+                            pickle.dump(embed_dict, fp)
+            
+            # run kernel-based methods (ADM+, ADM, kCCA, NCCA, etc.)
             else:
                 # create results directory
                 t_list = [0] if method in PARTIAL_VIEW_KERNEL_METHODS.union(FULL_VIEW_KERNEL_METHODS) else embed_params['t_list']
                 results_dir = (
-                    f'{sim_params["figures_path"]}/batch_{i}_method_{method}_s1_{embed_params["kernel_scale1"]}_'
-                    f's2_{embed_params["kernel_scale2"]}_train_percent_{train_percent}').replace('.', 'p')
+                    f'{sim_params["figures_path"]}/batch_{i}_method_{method}_s1_{embed_params["param1"]}_'
+                    f's2_{embed_params["param2"]}_train_percent_{train_percent}').replace('.', 'p')
                 os.makedirs(results_dir, exist_ok=True)
                 # load data if available
                 path = f"{results_dir}/data_seed_{seed}"
@@ -474,12 +598,15 @@ def task_classification(data_LR, data_RL=None, method='single', dist_mats=None, 
                                                                        method, dist_mat_LR, dist_mat_RL, modalities=modalities,
                                                                        plot_flag=sim_params['debug_plot'],
                                                                        k=embed_params['kernel_sparsity'])
-                    # embed with desired method
+                    # embed with desired method, embed to max dim to save computation time 
+                    # and then calculate accuracy for different embedding dimensions by truncating the embedding
                     embed_dim = max(embed_params['embed_dims'])
+                    start_time = time()
                     vals, vecs = embed_wrapper(method=method, embed_dim=embed_dim,
                                           K1=K1, K2=K2, solver=embed_params['evd_solver'],
                                           delete_kernels=embed_params['delete_kernels'], tol=embed_params['eig_tol'],
                                           stabilize=embed_params['stabilize'], return_vecs=True)
+                    run_time = time() - start_time
                     # embed the validation set
                     vals_val, vecs_val = embed_wrapper(method=method, embed_dim=embed_dim,
                                                K1=K1_val, K2=K2_val, solver=embed_params['evd_solver'],
@@ -495,39 +622,11 @@ def task_classification(data_LR, data_RL=None, method='single', dist_mats=None, 
                         else:
                             embed = np.real((vals[1:dim + 1]**t) * vecs[:, 1:dim + 1])
                             embed_val = np.real((vals_val[1:dim + 1] ** t) * vecs_val[:, 1:dim + 1])
-                        acc_val, acc_test, silhouette_pred = calc_accuracy(embed=embed, embed_val=embed_val, Nr=Nr,
-                                                                           N_val=N_val, task_labels_batch=
-                                                                           task_labels_batch, embed_params=embed_params)
-                        new_line = {
-                            'method': method,
-                            'kernel_scale1': embed_params['kernel_scale1'],
-                            'kernel_scale2': embed_params['kernel_scale2'],
-                            'dim': dim,
-                            't': t,
-                            'train_percent': train_percent,
-                            'batch_size': sim_params['batch_size'],
-                            'batch': i,
-                            'seed': seed,
-                            'zero_diag': embed_params['zero_diag'],
-                            'solver': embed_params['evd_solver'],
-                            'classifier': embed_params['classifier'],
-                            'shuffle_subjects': embed_params['shuffle_subjects'],
-                            'valid_accuracy': acc_val,
-                            'test_accuracy': acc_test,
-                            'silhouette_gt': silhouette_score(embed, task_labels_batch),
-                            'silhouette_pred_test': silhouette_pred
-                        }
+                        new_line = evaluate_sample(embed, embed_val, Nr, N_val, task_labels_batch, 
+                                                   embed_params, method, dim, t, train_percent, 
+                                                   sim_params, batch_index=i, seed=seed, 
+                                                   run_time=run_time, results_dir=results_dir)
                         results.append(new_line)
-                        if sim_params['save_format'] == 'plot':
-                            ref_indicator = np.hstack((np.ones(Nr), np.zeros(N - Nr)))
-                            # plot_embed(embed[:, :2], title=f'batch_{i}_method_{method}_acc_{acc}',
-                            #            colors=task_labels_batch, ref_indicator=ref_indicator)
-                            title_str = f'{results_dir}/t_{t}_dim_{dim}'
-                            # plt.savefig(f'{title_str}.pdf', dpi=300, format='pdf')
-                            plot_embed_tsne(embed, title=f'batch_{i}_method_{method}_acc_{acc_test}',
-                                            colors=task_labels_batch, ref_indicator=ref_indicator,
-                                            color_labels=sim_params['tasks_list'])
-                            plt.savefig(f'{title_str}_tsne_seed_{seed}.pdf', dpi=300, format='pdf')
                 if sim_params['save_format'] == 'data':
                     embed_dict = dict()
                     embed_dict['vecs'] = vecs
