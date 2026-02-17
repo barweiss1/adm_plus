@@ -103,9 +103,10 @@ def run_opt_method(LR_smooth, RL_smooth, dist_mats_euclidean, mu,
         'zero_diag': False,
     }
     # task classification
-    results_df = task_classification(LR_smooth, RL_smooth, method=method, dist_mats=dist_mats_euclidean,
-                                        metric='euclidean', embed_params=embed_params,
-                                        sim_params=sim_params, train_percent=train_percent)
+    results_df = task_classification(LR_smooth, RL_smooth, method=method, 
+                                     dist_mats=dist_mats_euclidean,
+                                     metric='euclidean', embed_params=embed_params,
+                                     sim_params=sim_params, train_percent=train_percent)
     return results_df
 
 
@@ -145,7 +146,8 @@ def run_simulation(args, sim_params):
                     if not job_num % args.n_tasks == args.task_id:
                         continue
                     results_df = run_opt_method(LR_smooth, RL_smooth, dist_mats_euclidean,
-                                                None, None, opt_method, None, sim_params)
+                                                mu=mu, method=opt_method, train_percent=train_percent, 
+                                                sim_params=sim_params)
                     result_dfs.append(results_df)
     kernel_scales1 = sim_params['kernel_scales1']
     if sim_params['same_scales']:
