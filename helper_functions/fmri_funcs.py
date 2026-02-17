@@ -38,17 +38,22 @@ def load_data(data_path, data_type='smooth'):
     return LR, RL
 
 
-def load_data_from_pkl(path):
+def load_data_from_pkl(path, method):
     with open(f"{path}.pkl", 'rb') as fp:
         embed_dict = pickle.load(fp)
-    vecs = embed_dict['vecs']
-    vals = embed_dict['vals']
-    vecs_val = embed_dict['vecs_val']
-    vals_val = embed_dict['vals_val']
     results = embed_dict['df']
     ref_indicator = embed_dict['ref_indicator']
     task_labels_batch = embed_dict['labels_batch']
-    return vecs, vals, vecs_val, vals_val, task_labels_batch
+    if method in OPT_METHODS:
+        embed_full = embed_dict['embed_full']
+        embed_full_val = embed_dict['embed_full_val']
+        return embed_full, embed_full_val, task_labels_batch
+    else:
+        vecs = embed_dict['vecs']
+        vals = embed_dict['vals']
+        vecs_val = embed_dict['vecs_val']
+        vals_val = embed_dict['vals_val']
+        return vecs, vals, vecs_val, vals_val, task_labels_batch
 
 
 def prepare_data(data_LR, data_RL):
@@ -568,10 +573,8 @@ def task_classification(data_LR, data_RL=None, method='single', dist_mats=None, 
                         results.append(new_line)
                     if sim_params['save_format'] == 'data':
                         embed_dict = dict()
-                        embed_dict['vecs'] = vecs
-                        embed_dict['vals'] = vals
-                        embed_dict['vecs_val'] = vecs_val
-                        embed_dict['vals_val'] = vals_val
+                        embed_dict['embed_full'] = embed_full
+                        embed_dict['embed_full_val'] = embed_full_val
                         embed_dict['df'] = results
                         embed_dict['ref_indicator'] = np.hstack((np.ones(Nr), np.zeros(N - Nr)))
                         embed_dict['labels_batch'] = task_labels_batch

@@ -3,6 +3,7 @@ import argparse
 import json
 import pickle
 import os
+from tqdm.auto import tqdm
 from time import time
 from helper_functions.fmri_funcs import (load_data, calculate_distances, task_classification)
 
@@ -138,22 +139,34 @@ def run_simulation(args, sim_params):
     train_percents = sim_params['train_percents']
     job_num = -1
     result_dfs = []
+    
     if args.run_opt_methods:
+        pbar = tqdm(total=len(sim_params['opt_methods']) *
+                     len(train_percents) * 
+                     len(sim_params['mu_list']), 
+                     desc="Running Optimization Methods")
         for opt_method in sim_params['opt_methods']:
             for train_percent in train_percents:
                 for mu in sim_params['mu_list']:
                     job_num += 1
                     if not job_num % args.n_tasks == args.task_id:
+                        pbar.update(1)
                         continue
                     results_df = run_opt_method(LR_smooth, RL_smooth, dist_mats_euclidean,
                                                 mu=mu, method=opt_method, train_percent=train_percent, 
                                                 sim_params=sim_params)
                     result_dfs.append(results_df)
+                    pbar.update(1)
     kernel_scales1 = sim_params['kernel_scales1']
     if sim_params['same_scales']:
-        kernel_scales2 = [1]  # save runtime
+        kernel_scales2 = [1] 
+        param_len = len(sim_params['kernel_scales1'])
     else:
+        param_len = len(sim_params['kernel_scales1']) * len(sim_params['kernel_scales2'])
         kernel_scales2 = sim_params['kernel_scales2']
+    pbar = tqdm(total=len(sim_params['methods']) * 
+                len(train_percents) * 
+                param_len , desc="Running Embedding Methods")
     for method in sim_params['methods']:
         for train_percent in train_percents:
             for kernel_scale2 in kernel_scales2:
@@ -161,11 +174,13 @@ def run_simulation(args, sim_params):
                     # if job isn't assigned to task_id continue
                     job_num += 1
                     if not job_num % args.n_tasks == args.task_id:
+                        pbar.update(1)
                         continue
                     results_df = run_embed_method(LR_smooth, RL_smooth, dist_mats_euclidean, 
                                                    kernel_scale1, kernel_scale2, method, 
                                                    train_percent, sim_params)
                     result_dfs.append(results_df)
+                    pbar.update(1)
         
     results_all_df = pd.concat(result_dfs)
     os.makedirs(f'{figures_path}/machine_output', exist_ok=True)
