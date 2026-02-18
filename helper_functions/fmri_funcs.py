@@ -540,7 +540,7 @@ def task_classification(data_LR, data_RL=None, method='single', dist_mats=None, 
                 os.makedirs(results_dir, exist_ok=True)
                 path = f"{results_dir}/data_seed_{seed}"
                 if not sim_params['overwrite'] and os.path.isfile(f"{path}.pkl"):
-                    vecs, vals, vecs_val, vals_val, task_labels_batch = load_data_from_pkl(path, method)
+                    embed_full, embed_full_val, task_labels_batch = load_data_from_pkl(path, method)
                 else:
                     # optmization methods work with features and not kernels
                     (task_labels_batch, view1, view2, view1_val, 
@@ -563,24 +563,24 @@ def task_classification(data_LR, data_RL=None, method='single', dist_mats=None, 
                     else:
                         raise ValueError(f"Unsupported optimization method: {method}")
                     
-                    for dim in embed_params['embed_dims']:
-                        embed = embed_full[:, :dim]
-                        embed_val = embed_full_val[:, :dim]
-                        new_line = evaluate_sample(embed, embed_val, Nr, N_val, task_labels_batch, 
-                                                   embed_params, method, dim, t=0.0, train_percent=train_percent,
-                                                   sim_params=sim_params, batch_index=i, seed=seed,
-                                                   results_dir=results_dir, run_time=run_time)
-                        results.append(new_line)
-                    if sim_params['save_format'] == 'data':
-                        embed_dict = dict()
-                        embed_dict['embed_full'] = embed_full
-                        embed_dict['embed_full_val'] = embed_full_val
-                        embed_dict['df'] = results
-                        embed_dict['ref_indicator'] = np.hstack((np.ones(Nr), np.zeros(N - Nr)))
-                        embed_dict['labels_batch'] = task_labels_batch
-                        embed_dict['tasks_list'] = sim_params['tasks_list']
-                        with open(f"{results_dir}/data_seed_{seed}.pkl", 'wb') as fp:
-                            pickle.dump(embed_dict, fp)
+                for dim in embed_params['embed_dims']:
+                    embed = embed_full[:, :dim]
+                    embed_val = embed_full_val[:, :dim]
+                    new_line = evaluate_sample(embed, embed_val, Nr, N_val, task_labels_batch, 
+                                                embed_params, method, dim, t=0.0, train_percent=train_percent,
+                                                sim_params=sim_params, batch_index=i, seed=seed,
+                                                results_dir=results_dir, run_time=run_time)
+                    results.append(new_line)
+                if sim_params['save_format'] == 'data':
+                    embed_dict = dict()
+                    embed_dict['embed_full'] = embed_full
+                    embed_dict['embed_full_val'] = embed_full_val
+                    embed_dict['df'] = results
+                    embed_dict['ref_indicator'] = np.hstack((np.ones(Nr), np.zeros(N - Nr)))
+                    embed_dict['labels_batch'] = task_labels_batch
+                    embed_dict['tasks_list'] = sim_params['tasks_list']
+                    with open(f"{results_dir}/data_seed_{seed}.pkl", 'wb') as fp:
+                        pickle.dump(embed_dict, fp)
             
             # run kernel-based methods (ADM+, ADM, kCCA, NCCA, etc.)
             else:
