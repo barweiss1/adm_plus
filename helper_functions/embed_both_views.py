@@ -136,7 +136,8 @@ class APMC:
         Z_norm = Z @ norm_mat
 
         vals, vecs = SVD_trick(Z_norm, self.cfg.embed_dim)
-        return vecs[:, 1:self.cfg.embed_dim + 1]
+        self.embedding_ = vecs[:, 1:self.cfg.embed_dim + 1]
+        return self
     
     def get_embedding(self) -> np.ndarray:
         if self.embedding_ is None:

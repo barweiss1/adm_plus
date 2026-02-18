@@ -47,13 +47,13 @@ def load_data_from_pkl(path, method):
     if method in OPT_METHODS:
         embed_full = embed_dict['embed_full']
         embed_full_val = embed_dict['embed_full_val']
-        return embed_full, embed_full_val, task_labels_batch
+        return embed_full, embed_full_val, task_labels_batch, results
     else:
         vecs = embed_dict['vecs']
         vals = embed_dict['vals']
         vecs_val = embed_dict['vecs_val']
         vals_val = embed_dict['vals_val']
-        return vecs, vals, vecs_val, vals_val, task_labels_batch
+        return vecs, vals, vecs_val, vals_val, task_labels_batch, results
 
 
 def prepare_data(data_LR, data_RL):
@@ -540,7 +540,8 @@ def task_classification(data_LR, data_RL=None, method='single', dist_mats=None, 
                 os.makedirs(results_dir, exist_ok=True)
                 path = f"{results_dir}/data_seed_{seed}"
                 if not sim_params['overwrite'] and os.path.isfile(f"{path}.pkl"):
-                    embed_full, embed_full_val, task_labels_batch = load_data_from_pkl(path, method)
+                    embed_full, embed_full_val, task_labels_batch, loaded_results = load_data_from_pkl(path, method)
+                    run_time = results[0]['run_time'] if len(loaded_results) > 0 else None
                 else:
                     # optmization methods work with features and not kernels
                     (task_labels_batch, view1, view2, view1_val, 
@@ -593,7 +594,8 @@ def task_classification(data_LR, data_RL=None, method='single', dist_mats=None, 
                 # load data if available
                 path = f"{results_dir}/data_seed_{seed}"
                 if not sim_params['overwrite'] and os.path.isfile(f"{path}.pkl"):
-                    vecs, vals, vecs_val, vals_val, task_labels_batch = load_data_from_pkl(path, method)
+                    vecs, vals, vecs_val, vals_val, task_labels_batch, loaded_results = load_data_from_pkl(path, method)
+                    run_time = results[0]['run_time'] if len(loaded_results) > 0 else None
                 else:
                     # compute kernels
                     (task_labels_batch, K1, K2,
