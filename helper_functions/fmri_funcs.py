@@ -540,8 +540,8 @@ def task_classification(data_LR, data_RL=None, method='single', dist_mats=None, 
                 os.makedirs(results_dir, exist_ok=True)
                 path = f"{results_dir}/data_seed_{seed}"
                 if not sim_params['overwrite'] and os.path.isfile(f"{path}.pkl"):
-                    embed_full, embed_full_val, task_labels_batch, loaded_results = load_data_from_pkl(path, method)
-                    run_time = results[0]['run_time'] if len(loaded_results) > 0 else None
+                    embed_full, embed_full_val, task_labels_batch, results_df = load_data_from_pkl(path, method)
+                    run_time = results_df['run_time'][0]
                 else:
                     # optmization methods work with features and not kernels
                     (task_labels_batch, view1, view2, view1_val, 
@@ -594,8 +594,8 @@ def task_classification(data_LR, data_RL=None, method='single', dist_mats=None, 
                 # load data if available
                 path = f"{results_dir}/data_seed_{seed}"
                 if not sim_params['overwrite'] and os.path.isfile(f"{path}.pkl"):
-                    vecs, vals, vecs_val, vals_val, task_labels_batch, loaded_results = load_data_from_pkl(path, method)
-                    run_time = results[0]['run_time'] if len(loaded_results) > 0 else None
+                    vecs, vals, vecs_val, vals_val, task_labels_batch, results_df = load_data_from_pkl(path, method)
+                    run_time = results_df['run_time'][0]
                 else:
                     # compute kernels
                     (task_labels_batch, K1, K2,
