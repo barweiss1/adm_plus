@@ -105,10 +105,10 @@ class APMC:
         n2_full = X2_aligned.shape[0]
 
         # compute kernels
-        A1 = Create_Asym_Tran_Kernel(X1_aligned, X1_ref, 
+        A1, _, _ = Create_Asym_Tran_Kernel(X1_aligned, X1_ref, 
                                              self.cfg.kernel_scale1, 
                                              self.cfg.scale_mode)
-        A2 = Create_Asym_Tran_Kernel(X2_aligned, X2_ref,
+        A2, _, _ = Create_Asym_Tran_Kernel(X2_aligned, X2_ref,
                                              self.cfg.kernel_scale2, 
                                              self.cfg.scale_mode)
         # compute the embedding for each mode
@@ -210,10 +210,10 @@ class ADM_PLUS:
         n2_full = X2.shape[0]
 
         # compute kernels
-        A1 = Create_Asym_Tran_Kernel(X1_aligned, X1_ref, 
+        A1, _, _ = Create_Asym_Tran_Kernel(X1_aligned, X1_ref, 
                                              self.cfg.kernel_scale1, 
                                              self.cfg.scale_mode)
-        A2 = Create_Asym_Tran_Kernel(X2_aligned, X2_ref,
+        A2, _, _ = Create_Asym_Tran_Kernel(X2_aligned, X2_ref,
                                              self.cfg.kernel_scale2, 
                                              self.cfg.scale_mode)
         # compute the embedding for each mode

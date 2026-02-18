@@ -540,7 +540,7 @@ def task_classification(data_LR, data_RL=None, method='single', dist_mats=None, 
                 os.makedirs(results_dir, exist_ok=True)
                 path = f"{results_dir}/data_seed_{seed}"
                 if not sim_params['overwrite'] and os.path.isfile(f"{path}.pkl"):
-                    vecs, vals, vecs_val, vals_val, task_labels_batch = load_data_from_pkl(path)
+                    vecs, vals, vecs_val, vals_val, task_labels_batch = load_data_from_pkl(path, method)
                 else:
                     # optmization methods work with features and not kernels
                     (task_labels_batch, view1, view2, view1_val, 
@@ -593,7 +593,7 @@ def task_classification(data_LR, data_RL=None, method='single', dist_mats=None, 
                 # load data if available
                 path = f"{results_dir}/data_seed_{seed}"
                 if not sim_params['overwrite'] and os.path.isfile(f"{path}.pkl"):
-                    vecs, vals, vecs_val, vals_val, task_labels_batch = load_data_from_pkl(path)
+                    vecs, vals, vecs_val, vals_val, task_labels_batch = load_data_from_pkl(path, method)
                 else:
                     # compute kernels
                     (task_labels_batch, K1, K2,
