@@ -44,8 +44,7 @@ def load_simulation_params():
         'seeds': [0, 3, 14, 35, 61, 78, 90, 102, 112, 123],  # use 10 different random seeds
         'figures_path': f'figures/fmri/task_classification/{sim_name}',
         'tasks_list': ['GAM', 'REST', 'REST2', 'LAN', 'MOT', 'REL', 'SOC', 'WM', 'EMO'],
-        # 'methods': ['nystrom', 'ncca', 'kcca', 'kcca_impute', 'ad', 'dm', 'ffbb', 'fbfb', 'forward_only'],
-        'methods': ['adm_plus', 'backward_only', 'nystrom', 'ncca', 'kcca', 'kcca_impute', 'ad', 'dm',
+        'methods': ['adm_plus', 'backward_only', 'nystrom', 'ncca', 'kcca_impute', 'ad', 'dm',
                     'apmc', 'forward_only'],
         'opt_methods': ['fimvc_via'],  # optimization methods with different parameters
         'unify_rest': True,
