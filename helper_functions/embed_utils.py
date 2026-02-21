@@ -177,9 +177,7 @@ def Create_Asym_Tran_Kernel(data_points1, data_points2, scale=2, mode='median'):
     start_time = time()
     # Calculate the kernel matrix
     dist_mat = sci.spatial.distance.cdist(data_points1, data_points2, metric='euclidean')
-
-    # Compute Kernel
-    sigma = np.median(dist_mat)  # popular choice for sigma
+    
 
     if mode == 'median':
         adjusted_scale = (np.median(dist_mat) ** 2) * scale  # popular choice for sigma
