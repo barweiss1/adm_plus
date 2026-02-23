@@ -13,6 +13,8 @@ def setup_arg_parser():
     parser.add_argument("task_id", type=int, nargs='?', default=0, help="Task ID for parallel execution")
     parser.add_argument("n_tasks", type=int, nargs='?', default=1, help="Number of tasks for parallel execution")
     parser.add_argument("--run_opt_methods", action='store_true', help="Run the optimization methods as well (FIMVC-VIA, DVSAI)")
+    parser.add_argument("--summarize_results", action='store_true', 
+                        help="Summarize results by merging CSV files (should be used with task_id 0 after all tasks are done)")
 
     return parser.parse_args()
 
@@ -37,7 +39,7 @@ def load_simulation_params():
         'modalities': 'LR-LR',  # tasks, labels, LR-RL, LR-LR
         'debug_plot': False,
         'overwrite': False,
-        'summarize_results': True,
+        # 'summarize_results': True,
         'save_format': 'data',  # 'plot', 'data'
         'batch_size': 4554,  # 506, 1518, 911, 2277
         'data_path': 'fmri_data',
@@ -217,7 +219,7 @@ def merge_csvs(sim_params):
 if __name__ == '__main__':
     args = setup_arg_parser()
     sim_params = load_simulation_params()
-    if sim_params['summarize_results']:
+    if args.summarize_results:
         if args.task_id == 0:
             merge_csvs(sim_params)
     else:
