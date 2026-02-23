@@ -37,7 +37,7 @@ def load_simulation_params():
         'modalities': 'LR-LR',  # tasks, labels, LR-RL, LR-LR
         'debug_plot': False,
         'overwrite': False,
-        'summarize_results': False,
+        'summarize_results': True,
         'save_format': 'data',  # 'plot', 'data'
         'batch_size': 4554,  # 506, 1518, 911, 2277
         'data_path': 'fmri_data',

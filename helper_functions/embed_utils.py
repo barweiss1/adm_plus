@@ -77,12 +77,12 @@ def Create_Transition_Mat(data_points, scale=2, mode='median'):
 
     # Compute Kernel
     if mode == 'median':
-        adjusted_scale = (np.median(dist_mat) ** 2) * scale # popular choice for sigma
+        adjusted_scale = np.median(dist_mat) * scale # popular choice for sigma
     elif mode == 'scale':
         adjusted_scale = scale
     else:
         raise ValueError(f'invalid mode {mode}')
-    K_mat = np.exp(-dist_mat ** 2 / adjusted_scale)
+    K_mat = np.exp(-dist_mat ** 2 / (adjusted_scale ** 2))
     # Noramalize kernel matrix columns to create Markov transition matrix
     P = column_norm(K_mat)
     end_time = time()
@@ -115,7 +115,7 @@ def dist2kernel(dist_mat, scale=2, zero_diag=False, k=None):
 
         # Compute sigma using the median of the non-zero elements of the K nearest distances
         sigma = np.median(k_nearest_distances[k_nearest_distances > 0])
-        adjusted_scale = (sigma ** 2) * scale  # popular choice for sigma
+        adjusted_scale = sigma * scale  # popular choice for sigma
 
         # Initialize the kernel matrix with zeros
         K_mat = np.zeros_like(dist_mat)
@@ -123,15 +123,15 @@ def dist2kernel(dist_mat, scale=2, zero_diag=False, k=None):
         # Compute the kernel for the K nearest points
         for i in range(dist_mat.shape[0]):
             nearest_indices = np.argsort(dist_mat[i])[1:k + 1]  # Excluding self
-            K_mat[i, nearest_indices] = np.exp(-dist_mat[i, nearest_indices] ** 2 / (adjusted_scale))
+            K_mat[i, nearest_indices] = np.exp(-dist_mat[i, nearest_indices] ** 2 / (adjusted_scale ** 2))
 
     else:
         # Compute sigma using the median of the non-zero elements in the distance matrix
         sigma = np.median(dist_mat[dist_mat > 0])
-        adjusted_scale = (sigma ** 2) * scale  # popular choice for sigma
+        adjusted_scale = scale * sigma  # popular choice for sigma
 
         # Compute the kernel for all points
-        K_mat = np.exp(-dist_mat ** 2 / (adjusted_scale))
+        K_mat = np.exp(-dist_mat ** 2 / (adjusted_scale ** 2))
 
     # Zero out the diagonal to eliminate self-loops
     if zero_diag:
@@ -156,11 +156,11 @@ def Create_Transition_Mat_Sparse(data_points, k=1000, scale=1):
     # Compute pairwise distances and median sigma
     distances = np.linalg.norm(data_points[roots_idx] - data_points[neighbors_idx], axis=1)
     sigma = np.median(distances)
-    adjusted_scale = (sigma ** 2) * scale  # popular choice for sigma
+    adjusted_scale = sigma * scale  # popular choice for sigma
 
     # Compute Kernel for KNN
-    K_mat[roots_idx, neighbors_idx] = np.exp(-distances ** 2 / (adjusted_scale))
-    K_mat[neighbors_idx, roots_idx] = np.exp(-distances ** 2 / (adjusted_scale))
+    K_mat[roots_idx, neighbors_idx] = np.exp(-distances ** 2 / (adjusted_scale ** 2))
+    K_mat[neighbors_idx, roots_idx] = np.exp(-distances ** 2 / (adjusted_scale ** 2))
 
     # Normalize columns
     P = column_norm(K_mat)
@@ -177,15 +177,15 @@ def Create_Asym_Tran_Kernel(data_points1, data_points2, scale=2, mode='median'):
     start_time = time()
     # Calculate the kernel matrix
     dist_mat = sci.spatial.distance.cdist(data_points1, data_points2, metric='euclidean')
-    
+
 
     if mode == 'median':
-        adjusted_scale = (np.median(dist_mat) ** 2) * scale  # popular choice for sigma
+        adjusted_scale = np.median(dist_mat) * scale  # popular choice for sigma
     elif mode == 'scale':
         adjusted_scale = scale
     else:
         raise ValueError(f'invalid mode {mode}')
-    A = np.exp(-dist_mat ** 2 / (adjusted_scale))
+    A = np.exp(-dist_mat ** 2 / (adjusted_scale ** 2))
     # Normalize columns of K_mat
     P_L = row_norm(A)
 
@@ -209,7 +209,7 @@ def Create_Asym_Tran_Kernel_Sparse(data_points1, data_points2, k=1000, scale=1):
 
     # compute median for the kernel scale
     sigma = np.median(distances.flatten())
-    adjusted_scale = (sigma ** 2) * scale  # popular choice for sigma
+    adjusted_scale = sigma * scale  # popular choice for sigma
 
     # Initialize a sparse matrix for the bipartite KNN graph
     n_samples_1 = data_points1.shape[0]
@@ -219,7 +219,7 @@ def Create_Asym_Tran_Kernel_Sparse(data_points1, data_points2, k=1000, scale=1):
     # Set True for nearest neighbors in the bipartite KNN graph
     idx1 = np.arange(n_samples_1)
     for kk in range(k):
-        A[idx1, indices[idx1, kk]] = np.exp(-distances[:, kk] ** 2 / (adjusted_scale))
+        A[idx1, indices[idx1, kk]] = np.exp(-distances[:, kk] ** 2 / (adjusted_scale ** 2))
 
     # Normalize columns of K_mat
     P_L = row_norm(A)

@@ -1,5 +1,5 @@
 from helper_functions.embed_methods import adm_plus, apmc_embed
-from helper_functions.embed_utils import Create_Asym_Tran_Kernel
+from helper_functions.embed_utils import Create_Asym_Tran_Kernel, dist2kernel
 from helper_functions.embed_utils import row_norm
 from helper_functions.embed_methods import SVD_trick
 
@@ -29,6 +29,13 @@ class EmbeddingMethod:
             X1: np.ndarray, 
             X2: np.ndarray
             ):
+        """
+        Preprocess two views with missing samples to get reference and aligned matrices for each view.
+        This is done by inferring presense mask from NaN rows, splitting into reference (both views)
+        adn aligned (entire view measurements) such that the first n_anchors rows of aligned are the reference samples, 
+        and the rest are the view-specific samples.
+
+        """
         mask1 = infer_presence_mask(X1)
         mask2 = infer_presence_mask(X2)
         mask_both = mask1 & mask2
@@ -141,9 +148,6 @@ class NaiveEmbed(EmbeddingMethod):
         mask_both = masks[0] & masks[1]
         # unify kernels
         Z = np.zeros((N, n_anchors), dtype=np.float64)
-        # Z[mask_both, :] = 0.5*(A2[:n_anchors, :] + A1[:n_anchors, :])
-        # Z[masks[0] & ~mask_both, :] = A1[n_anchors:, :]
-        # Z[masks[1] & ~mask_both, :] = A2[n_anchors:, :]
         Z[index_info['indices_v1_only'], :] = A1[n_anchors:, :]
         Z[index_info['indices_v2_only'], :] = A2[n_anchors:, :]
         Z[index_info['indices_both'], :] = 0.5*(A2[:n_anchors, :] + A1[:n_anchors, :])
@@ -169,15 +173,13 @@ class NaiveEmbed(EmbeddingMethod):
         if self.embedding_ is None:
             raise RuntimeError("Call fit() first.")
         return self.embedding_
+    
 
-# ----------------------------- APMC -----------------------------
-
-
-class APMC(EmbeddingMethod):
+class RoselandEmbed(EmbeddingMethod):
     def __init__(self, cfg: EmbeddingConfig):
         self.cfg = cfg
 
-    def fit(self, X1: np.ndarray, X2: np.ndarray) -> "APMC":
+    def fit(self, X1: np.ndarray, X2: np.ndarray) -> "RoselandEmbed":
         (X1_ref, X1_aligned, X2_ref,
           X2_aligned, masks, index_info) = self._preprocess(X1, X2)
         # get sizes
@@ -194,9 +196,56 @@ class APMC(EmbeddingMethod):
                                              self.cfg.kernel_scale2, 
                                              self.cfg.scale_mode)
         # compute the embedding for each mode
+        mask_both = masks[0] & masks[1]
+        # unify kernels
+        Z = np.zeros((N, n_anchors), dtype=np.float64)
+        Z[index_info['indices_v1_only'], :] = A1[n_anchors:, :]
+        Z[index_info['indices_v2_only'], :] = A2[n_anchors:, :]
+        Z[index_info['indices_both'], :] = 0.5*(A2[:n_anchors, :] + A1[:n_anchors, :])
+
+        # normalize Z
+        # col_sum = np.array(Z.sum(axis=0)).flatten()
+        col_sum = Z.T @ np.ones(N)  # Roseland normalization
+        col_sum = Z @ col_sum
+        # Handle division by zero in col_sum
+        col_sum[col_sum == 0] = 1
+        # Compute the inverse of column sums
+        inv_sum = col_sum ** (-0.5)
+        # remove inf values in inv_sum
+        inv_sum[np.isinf(inv_sum)] = 1
+        # Create diagonal matrix with inverse column sums
+        norm_mat = sp.diags(inv_sum)
+        # Normalize columns
+        Z_norm = norm_mat @ Z
+
+        vals, vecs = SVD_trick(Z_norm, self.cfg.embed_dim)
+        self.embedding_ = vecs[:, 1:self.cfg.embed_dim + 1]
+        return self
+    
+    def get_embedding(self) -> np.ndarray:
+        if self.embedding_ is None:
+            raise RuntimeError("Call fit() first.")
+        return self.embedding_
+
+# ----------------------------- APMC -----------------------------
+
+
+class APMC(EmbeddingMethod):
+    def __init__(self, cfg: EmbeddingConfig):
+        self.cfg = cfg
+
+    def _embed_from_kernels(
+            self,
+            A1: np.ndarray,
+            A2: np.ndarray, 
+            n_anchors: int,
+            N: int,
+            index_info: Dict[str, np.ndarray]
+    ) -> "APMC":
+        
+        # compute the embedding for each mode
         Q1 = row_norm(A1)
         Q2 = row_norm(A2)
-        mask_both = masks[0] & masks[1]
         # unify kernels
         Z = np.zeros((N, n_anchors), dtype=np.float64)
         Z[index_info['indices_v1_only'], :] = Q1[n_anchors:, :]
@@ -217,8 +266,55 @@ class APMC(EmbeddingMethod):
         Z_norm = Z @ norm_mat
 
         vals, vecs = SVD_trick(Z_norm, self.cfg.embed_dim)
-        self.embedding_ = vecs[:, 1:self.cfg.embed_dim + 1]
+        return vecs[:, 1:self.cfg.embed_dim + 1]
+    
+    def fit_from_dist_mats(
+            self, 
+            D1: np.ndarray,
+            D2: np.ndarray,
+            X1: np.ndarray,
+            X2: np.ndarray,
+            ) -> "APMC":
+        
+        (X1_ref, X1_aligned, X2_ref,
+          X2_aligned, masks, index_info) = self._preprocess(X1, X2)
+        # get sizes
+        N = X1.shape[0]
+        n_anchors = X1_ref.shape[0] 
+
+        # mask values from distance matrices
+        mask_both = masks[0] & masks[1]
+        D1_aligned = D1[index_info['aligned_to_original_v1'], :][:, index_info['indices_both']]
+        D2_aligned = D2[index_info['aligned_to_original_v2'], :][:, index_info['indices_both']]
+
+        # kernels from distance matrices
+        A1 = dist2kernel(D1_aligned, scale=self.cfg.kernel_scale1, zero_diag=False, k=None)
+        A2 = dist2kernel(D2_aligned, scale=self.cfg.kernel_scale2, zero_diag=False, k=None)
+
+        self.embedding_ = self._embed_from_kernels(A1, A2, n_anchors, N, index_info)
         return self
+
+    
+    def fit(self, X1: np.ndarray, X2: np.ndarray) -> "APMC":
+        (X1_ref, X1_aligned, X2_ref,
+          X2_aligned, masks, index_info) = self._preprocess(X1, X2)
+        # get sizes
+        N = X1.shape[0]
+        n_anchors = X1_ref.shape[0] 
+        n1_full = X1_aligned.shape[0]
+        n2_full = X2_aligned.shape[0]
+
+        # compute kernels
+        A1, _, _ = Create_Asym_Tran_Kernel(X1_aligned, X1_ref, 
+                                             self.cfg.kernel_scale1, 
+                                             self.cfg.scale_mode)
+        A2, _, _ = Create_Asym_Tran_Kernel(X2_aligned, X2_ref,
+                                             self.cfg.kernel_scale2, 
+                                             self.cfg.scale_mode)
+        
+        self.embedding_ = self._embed_from_kernels(A1, A2, n_anchors, N, index_info)
+        return self
+    
     
     def get_embedding(self) -> np.ndarray:
         if self.embedding_ is None:
@@ -232,6 +328,8 @@ class ADMPlusConfig(EmbeddingConfig):
     kernel_scale1: float = 1.0
     kernel_scale2: float = 1.0
     scale_mode: str = "median"  # "median" or "sigma"
+    fusion_scale: float = 1.0
+    fusion_method: str = "apmc"  # "apmc" or "roseland" or "naive"
     embed_dim: int = 30  
 
 # ----------------------------- Model -----------------------------
@@ -261,6 +359,52 @@ class ADM_PLUS(EmbeddingMethod):
         self.vals_: Optional[np.ndarray] = None
 
 
+    def _embed_from_kernels(
+            self,
+            A1: np.ndarray,
+            A2: np.ndarray, 
+            n_anchors: int,
+            N: int,
+            index_info: Dict[str, np.ndarray]
+    ) -> "ADM_PLUS":
+        
+        # compute the embedding for each mode
+        embed1_aligned = adm_plus(embed_dim=self.cfg.embed_dim,
+                          t=self.cfg.t, A1=A1, 
+                          K2_ref=A2[:n_anchors, :],
+                          return_vecs=False)
+        embed2_aligned = adm_plus(embed_dim=self.cfg.embed_dim,
+                          t=self.cfg.t, A1=A2,
+                          K2_ref=A1[:n_anchors, :],
+                          return_vecs=False)
+        
+        # Map embeddings back to original order using index_info
+        embed1_full = np.full((N, self.cfg.embed_dim), np.nan, dtype=np.float64)
+        embed2_full = np.full((N, self.cfg.embed_dim), np.nan, dtype=np.float64)
+        
+        # Use the index mappings to restore original order
+        embed1_full[index_info['aligned_to_original_v1'], :] = embed1_aligned
+        embed2_full[index_info['aligned_to_original_v2'], :] = embed2_aligned
+        
+        # combine the two embeddings with APMC
+        apmc_config = EmbeddingConfig(
+            kernel_scale1=self.cfg.fusion_scale, 
+            kernel_scale2=self.cfg.fusion_scale, 
+            scale_mode="median", 
+            embed_dim=self.cfg.embed_dim
+        )
+        if self.cfg.fusion_method == "apmc":
+            apmc = APMC(apmc_config)
+            return apmc.fit(embed1_full, embed2_full).get_embedding()
+        elif self.cfg.fusion_method == "roseland":
+            roseland = RoselandEmbed(apmc_config)
+            return roseland.fit(embed1_full, embed2_full).get_embedding()
+        elif self.cfg.fusion_method == "naive":
+            naive = NaiveEmbed(apmc_config)
+            return naive.fit(embed1_full, embed2_full).get_embedding()
+        else:
+            raise ValueError(f"Unknown fusion method: {self.cfg.fusion_method}")
+    
     def fit(
             self, 
             X1: np.ndarray,
@@ -282,33 +426,36 @@ class ADM_PLUS(EmbeddingMethod):
         A2, _, _ = Create_Asym_Tran_Kernel(X2_aligned, X2_ref,
                                              self.cfg.kernel_scale2, 
                                              self.cfg.scale_mode)
+        
         # compute the embedding for each mode
-        embed1_aligned = adm_plus(embed_dim=self.cfg.embed_dim,
-                          t=self.cfg.t, A1=A1, 
-                          K2_ref=A2[:n_anchors, :],
-                          return_vecs=False)
-        embed2_aligned = adm_plus(embed_dim=self.cfg.embed_dim,
-                          t=self.cfg.t, A1=A2,
-                          K2_ref=A1[:n_anchors, :],
-                          return_vecs=False)
         
-        # Map embeddings back to original order using index_info
-        embed1_full = np.full((N, self.cfg.embed_dim), np.nan, dtype=np.float64)
-        embed2_full = np.full((N, self.cfg.embed_dim), np.nan, dtype=np.float64)
+        self.embedding_ = self._embed_from_kernels(A1, A2, n_anchors, N, index_info)
+        return self
+
+    def fit_from_dist_mats(
+            self, 
+            D1: np.ndarray,
+            D2: np.ndarray,
+            X1: np.ndarray,
+            X2: np.ndarray,
+            ) -> "ADM_PLUS":
         
-        # Use the index mappings to restore original order
-        embed1_full[index_info['aligned_to_original_v1'], :] = embed1_aligned
-        embed2_full[index_info['aligned_to_original_v2'], :] = embed2_aligned
+        (X1_ref, X1_aligned, X2_ref,
+          X2_aligned, masks, index_info) = self._preprocess(X1, X2)
+        # get sizes
+        N = X1.shape[0]
+        n_anchors = X1_ref.shape[0] 
+
+        # select valid values from distance matrices
+        D1_aligned = D1[index_info['aligned_to_original_v1'], :][:, index_info['indices_both']]
+        D2_aligned = D2[index_info['aligned_to_original_v2'], :][:, index_info['indices_both']]
+
+        # kernels from distance matrices
+        A1 = dist2kernel(D1_aligned, scale=self.cfg.kernel_scale1, zero_diag=False, k=None)
+        A2 = dist2kernel(D2_aligned, scale=self.cfg.kernel_scale2, zero_diag=False, k=None)
+
+        self.embedding_ = self._embed_from_kernels(A1, A2, n_anchors, N, index_info)
         
-        # combine the two embeddings with APMC
-        apmc_config = EmbeddingConfig(
-            kernel_scale1=1.0, 
-            kernel_scale2=1.0, 
-            scale_mode="median", 
-            embed_dim=self.cfg.embed_dim
-        )
-        apmc = APMC(apmc_config)
-        self.embedding_ = apmc.fit(embed1_full, embed2_full).get_embedding()
         return self
 
 
