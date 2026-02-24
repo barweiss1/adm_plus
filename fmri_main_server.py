@@ -12,6 +12,7 @@ def setup_arg_parser():
     parser = argparse.ArgumentParser(description="fMRI Simulation Runner")
     parser.add_argument("task_id", type=int, nargs='?', default=0, help="Task ID for parallel execution")
     parser.add_argument("n_tasks", type=int, nargs='?', default=1, help="Number of tasks for parallel execution")
+    # IMPORTANT: optimization methods have much higher runtime
     parser.add_argument("--run_opt_methods", action='store_true', help="Run the optimization methods as well (FIMVC-VIA, DVSAI)")
     parser.add_argument("--summarize_results", action='store_true', 
                         help="Summarize results by merging CSV files (should be used with task_id 0 after all tasks are done)")
@@ -48,7 +49,7 @@ def load_simulation_params():
         'tasks_list': ['GAM', 'REST', 'REST2', 'LAN', 'MOT', 'REL', 'SOC', 'WM', 'EMO'],
         'methods': ['adm_plus', 'backward_only', 'nystrom', 'ncca', 'kcca_impute', 'ad', 'dm',
                     'apmc', 'forward_only'],
-        'opt_methods': ['fimvc_via'],  # optimization methods with different parameters
+        'opt_methods': ['fimvc_via'],  # optimization methods with different parameters, IMPORTANT: optimization methods have much higher runtime
         'unify_rest': True,
         'embed_dims': [5, 10, 15, 20, 30, 40, 50, 60, 70, 80, 90, 100],
         't_list': [0.1, 0.2, 0.3, 0.5, 1, 2],

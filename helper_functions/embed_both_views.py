@@ -357,6 +357,8 @@ class ADM_PLUS(EmbeddingMethod):
         self.embedding_: Optional[np.ndarray] = None
         self.vecs_: Optional[np.ndarray] = None
         self.vals_: Optional[np.ndarray] = None
+        self.embed_v1: Optional[np.ndarray] = None
+        self.embed_v2: Optional[np.ndarray] = None
 
 
     def _embed_from_kernels(
@@ -385,22 +387,26 @@ class ADM_PLUS(EmbeddingMethod):
         # Use the index mappings to restore original order
         embed1_full[index_info['aligned_to_original_v1'], :] = embed1_aligned
         embed2_full[index_info['aligned_to_original_v2'], :] = embed2_aligned
+
+        # store the full embeddings for debugging/analysis
+        self.embed_v1 = embed1_full
+        self.embed_v2 = embed2_full
         
         # combine the two embeddings with APMC
-        apmc_config = EmbeddingConfig(
+        fusion_config = EmbeddingConfig(
             kernel_scale1=self.cfg.fusion_scale, 
             kernel_scale2=self.cfg.fusion_scale, 
             scale_mode="median", 
             embed_dim=self.cfg.embed_dim
         )
         if self.cfg.fusion_method == "apmc":
-            apmc = APMC(apmc_config)
+            apmc = APMC(fusion_config)
             return apmc.fit(embed1_full, embed2_full).get_embedding()
         elif self.cfg.fusion_method == "roseland":
-            roseland = RoselandEmbed(apmc_config)
+            roseland = RoselandEmbed(fusion_config)
             return roseland.fit(embed1_full, embed2_full).get_embedding()
         elif self.cfg.fusion_method == "naive":
-            naive = NaiveEmbed(apmc_config)
+            naive = NaiveEmbed(fusion_config)
             return naive.fit(embed1_full, embed2_full).get_embedding()
         else:
             raise ValueError(f"Unknown fusion method: {self.cfg.fusion_method}")
@@ -463,3 +469,8 @@ class ADM_PLUS(EmbeddingMethod):
         if self.embedding_ is None:
             raise RuntimeError("Call fit() first.")
         return self.embedding_
+    
+    def get_view_specific_embeddings(self) -> Tuple[np.ndarray, np.ndarray]:
+        if self.embed_v1 is None or self.embed_v2 is None:
+            raise RuntimeError("Call fit() first to compute view-specific embeddings.")
+        return self.embed_v1, self.embed_v2
