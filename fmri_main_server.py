@@ -53,7 +53,7 @@ def load_simulation_params():
         'unify_rest': True,
         'embed_dims': [5, 10, 15, 20, 30, 40, 50, 60, 70, 80, 90, 100],
         't_list': [0.1, 0.2, 0.3, 0.5, 1, 2],
-        'kernel_scales1': [0.1, 0.5, 1, 2, 10],
+        'kernel_scales1': [0.2, 0.5, 1, 2, 10, 15, 20, 30],
         'kernel_scales2': [0.5],
         'same_scales': True,
         'mu_list': [0.001, 0.01, 0.1, 1.0, 10.0, 100.0],  # regularization parameters for FIMVC-VIA
