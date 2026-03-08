@@ -10,7 +10,7 @@ We provide all the helper function required to run all the experiemnts in the **
 - `logo_main_scales.ipynb` - runs the rotating characters experiment with different common image sizes.
 - `logo_main_discrepeny.ipynb` - runs the rotating characters experiment with distributional discrepency between the fully viewed set and the partially viewed set. This is a long run time so it is best to run it in parallel on some server, sending splits with different paramerters to different CPUs `logo_main_server.py` implements this.
 - `fmri_main_server.py` - implements the fMRI experiment to run in parallel on multiple CPUs.
-- `fMRI_plots.ipynb' - post processing fMRI results.
+- `fMRI_plots.ipynb` - post processing fMRI results.
 - `logo_plots.ipynb` - post processing rotating images results.
 
 ## Appendix Figures
