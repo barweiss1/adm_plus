@@ -124,7 +124,7 @@ def sample_reference_set(data_dict, sim_params, bias_factor=0, seed=0,
         ref_idx.sort()
         # if there is residue, add some random samples to the reference set
         if residue > 0:
-            remaining_idx = [i for i in range(N - 1) if i not in ref_idx]
+            remaining_idx = [i for i in range(N) if i not in ref_idx]
             additional_idx = np.random.choice(remaining_idx, size=residue, replace=False, 
                                               p=normalized_weights[remaining_idx] / np.sum(normalized_weights[remaining_idx]))
             ref_idx = np.concatenate((ref_idx, additional_idx))
@@ -146,7 +146,8 @@ def sample_reference_set(data_dict, sim_params, bias_factor=0, seed=0,
     s1_aligned = np.concatenate((s1_ref, s1_single), axis=0)
     s2_single = s2[single_idx, :]  # save sensor 2 images for reference to completed images
     s2_aligned = np.concatenate((s2_ref, s2_single), axis=0)
-
+    print(f"reorder idx shape: {reorder_idx.shape}")
+    print(f"ref idx shape: {ref_idx.shape}")
     return s1_ref, s2_ref, s1_aligned, s2_aligned, reorder_idx, ref_idx
 
 
@@ -350,6 +351,7 @@ def plot_method_embedding(embed, figures_path, angles, Nr, method, ref_idx, plot
     fig, ax = plot_funcs.subplots_plot(1, 1, figsize=figsize)
     colors = lin2circ_angles(angles)
     N_d = embed.shape[0]
+    print('embed shape in plot:', embed.shape)
     # total_idx = np.round(np.linspace(0, N_d - 1, N_d)).astype(int)
     total_idx = np.arange(N_d)
     single_idx = [i for i in total_idx if i not in ref_idx]
