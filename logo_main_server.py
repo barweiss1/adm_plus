@@ -32,7 +32,7 @@ def load_simulation_params():
     sim_type = 'm_sweep'  # 'm_sweep' / 'dist_discrepency'
     sim_params = {
         'delete_kernels': False,
-        'generate_data': True,
+        'generate_data': False,
         'sim_type': sim_type,
         'data_path': 'logo_data',
         'figures_path': f'figures/logo/{sim_type}',
