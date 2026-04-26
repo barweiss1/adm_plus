@@ -203,7 +203,7 @@ def process_iteration(data_dict, sim_params, validation_idx, figures_path, bias_
     font_properties_ticks = sim_params['font_properties_ticks']
     angles_common = lin2circ_angles(data_dict[f'common_angles'])
     results = []
-    for scale in tqdm.tqdm(sim_params['scales'], desc=f'Processing scales'):
+    for scale in tqdm.tqdm(sim_params['scales'], desc='Processing scales'):
         start_time = time()
         A1, _, _ = Create_Asym_Tran_Kernel(s1_aligned, s1_ref, mode='median', scale=scale)
         if 'lad' in sim_params['ad_methods']:

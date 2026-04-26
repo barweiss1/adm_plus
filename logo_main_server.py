@@ -37,7 +37,7 @@ def load_simulation_params():
         'data_path': 'logo_data',
         'figures_path': f'figures/logo/{sim_type}',
         'evd_solver': 'arpack',  # 'arpack' / 'randomized' / 'svd'
-        # 'ad_methods': ['lead', 'forward_only', 'ncca', 'nystrom', 'adm_plus', 'backward_only'],
+        # 'ad_methods': ['lad', 'forward_only', 'ncca', 'nystrom', 'adm_plus', 'backward_only'],
         'ad_methods': ['forward_only', 'ncca', 'nystrom', 'adm_plus'],
         'seeds': [0, 3, 14, 35, 61, 78, 90, 102, 112, 123],  # use 10 different random seeds
         'embed_dim': 2,
