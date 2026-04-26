@@ -46,9 +46,9 @@ def load_simulation_params():
         'angle_bias_factors': [0, 0.2, 0.4, 0.6, 0.8, 1, 1.2, 1.4, 1.6, 1.8, 2],
         'angles_for_bias': 'common',  # specific1 / specific2 / common
         'im_resize_factor': 1.5,
-        # 'm_values': [30, 50, 100, 150, 200, 250, 300, 350, 400, 450],
-        'm_values': [30, 50, 100, 150],
-        'sampling_methods': ['uniform', 'stride'],
+        'm_values': [30, 50, 100, 150, 200, 250, 300, 350, 400, 450],
+        # 'm_values': [30, 50, 100, 150],
+        'sampling_methods': ['uniform', 'stride', 'random'],
         'stride_param': 10,  # only relevant if 'stride' is in sampling_methods
         'Nr': 100,  # number of samples in the reference set,
         'N': 1000,  # number of total samples
