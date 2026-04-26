@@ -33,9 +33,9 @@ def load_simulation_params():
     sim_params = {
         'delete_kernels': False,
         'generate_data': True,
-        'sim_type': sim_type,  # 'm_sweep' / 'dist_discrepency'
-        'data_path': 'logo_data/new_logos',
-        'figures_path': f'figures/new_logo/{sim_type}',
+        'sim_type': sim_type,
+        'data_path': 'logo_data',
+        'figures_path': f'figures/logo/{sim_type}',
         'evd_solver': 'arpack',  # 'arpack' / 'randomized' / 'svd'
         # 'ad_methods': ['lead', 'forward_only', 'ncca', 'nystrom', 'adm_plus', 'backward_only'],
         'ad_methods': ['forward_only', 'ncca', 'nystrom', 'adm_plus'],
