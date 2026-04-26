@@ -186,7 +186,8 @@ def evaluate_embed(embed, sim_params, validation_idx, angles_common, method, sca
 def process_iteration(data_dict, sim_params, validation_idx, figures_path, bias_factor=0, 
                       seed=0, sampling_method='random', m_value=None):
     (s1_ref, s2_ref, s1_aligned, s2_aligned,
-     reorder_idx, ref_idx) = sample_reference_set(data_dict, sim_params, bias_factor, seed)
+     reorder_idx, ref_idx) = sample_reference_set(data_dict, sim_params, bias_factor, seed,
+                                                  sampling_method, m_value)
     if sim_params['sim_type'] == 'm_sweep':
         iteration_path = f'{figures_path}/sampling_{sampling_method}_m_value_{m_value}_seed_{seed}'.replace('.', 'p')
     elif sim_params['sim_type'] == 'dist_discrepency':

@@ -188,13 +188,15 @@ def run_m_sweep_simulation(task_id, n_tasks, sim_params):
     task_counter = 0  # task counter to assign jobs to the different machines
     pbar = tqdm.tqdm(total=len(m_values) * (len(sim_params['seeds']) + len(sim_params['sampling_methods']) - 1), 
                      desc=f"Task {task_id}")
-    for m in m_values:
+    for m_value in m_values:
         for sampling_method in sim_params['sampling_methods']:
             for seed in sim_params['seeds']:
                 if task_counter % n_tasks == task_id:
                     validation_idx = get_validation_indices(sim_params, seed=seed)
-                    new_results = process_iteration(data_dict, sim_params, validation_idx, figures_path,
-                                                    bias_factor=0, seed=seed)
+                    new_results = process_iteration(data_dict, sim_params, validation_idx, 
+                                                    figures_path, bias_factor=0, seed=seed, 
+                                                    sampling_method=sampling_method, 
+                                                    m_value=m_value)
                     results.extend(new_results)
                 task_counter += 1
                 pbar.update(1)
