@@ -191,6 +191,8 @@ def run_m_sweep_simulation(task_id, n_tasks, sim_params):
     for m_value in m_values:
         for sampling_method in sim_params['sampling_methods']:
             for seed in sim_params['seeds']:
+                print(f"Processing m_value {m_value}, sampling_method {sampling_method}, "
+                      f"seed {seed} on task_id {task_id}")
                 if task_counter % n_tasks == task_id:
                     validation_idx = get_validation_indices(sim_params, seed=seed)
                     new_results = process_iteration(data_dict, sim_params, validation_idx, 
