@@ -37,7 +37,8 @@ def load_simulation_params():
         'data_path': 'logo_data/new_logos',
         'figures_path': f'figures/new_logo/{sim_type}',
         'evd_solver': 'arpack',  # 'arpack' / 'randomized' / 'svd'
-        'ad_methods': ['lead', 'forward_only', 'ncca', 'nystrom', 'adm_plus', 'backward_only'],
+        # 'ad_methods': ['lead', 'forward_only', 'ncca', 'nystrom', 'adm_plus', 'backward_only'],
+        'ad_methods': ['forward_only', 'ncca', 'nystrom', 'adm_plus'],
         'seeds': [0, 3, 14, 35, 61, 78, 90, 102, 112, 123],  # use 10 different random seeds
         'embed_dim': 2,
         't': 0,
@@ -45,9 +46,10 @@ def load_simulation_params():
         'angle_bias_factors': [0, 0.2, 0.4, 0.6, 0.8, 1, 1.2, 1.4, 1.6, 1.8, 2],
         'angles_for_bias': 'common',  # specific1 / specific2 / common
         'im_resize_factor': 1.5,
-        'm_values': [30, 50, 100, 150, 200, 250, 300, 350, 400, 450],
-        'sampling_methods': ['uniform', 'random', 'stride'],
-        'stride_param': 5,
+        # 'm_values': [30, 50, 100, 150, 200, 250, 300, 350, 400, 450],
+        'm_values': [30, 50, 100, 150],
+        'sampling_methods': ['uniform', 'stride'],
+        'stride_param': 10,  # only relevant if 'stride' is in sampling_methods
         'Nr': 100,  # number of samples in the reference set,
         'N': 1000,  # number of total samples
         'valid_size': 0.2,
