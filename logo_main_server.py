@@ -29,11 +29,13 @@ def load_simulation_params():
     font_properties_title = font_manager.FontProperties(family=font_name, size=28)
     font_properties_ticks = font_manager.FontProperties(family=font_name, size=22)
     figsize = (8, 7)
+    sim_type = 'm_sweep'  # 'm_sweep' / 'dist_discrepency'
     sim_params = {
         'delete_kernels': False,
         'generate_data': True,
+        'sim_type': 'sim_type',  # 'm_sweep' / 'dist_discrepency'
         'data_path': 'logo_data/new_logos',
-        'figures_path': 'figures/new_logo/dist_discrepency',
+        'figures_path': f'figures/new_logo/{sim_type}',
         'evd_solver': 'arpack',  # 'arpack' / 'randomized' / 'svd'
         'ad_methods': ['lead', 'forward_only', 'ncca', 'nystrom', 'adm_plus', 'backward_only'],
         'seeds': [0, 3, 14, 35, 61, 78, 90, 102, 112, 123],  # use 10 different random seeds
@@ -43,6 +45,9 @@ def load_simulation_params():
         'angle_bias_factors': [0, 0.2, 0.4, 0.6, 0.8, 1, 1.2, 1.4, 1.6, 1.8, 2],
         'angles_for_bias': 'common',  # specific1 / specific2 / common
         'im_resize_factor': 1.5,
+        'm_values': [30, 50, 100, 150, 200, 250, 300, 350, 400, 450],
+        'sampling_methods': ['uniform', 'random', 'stride'],
+        'stride_param': 5,
         'Nr': 100,  # number of samples in the reference set,
         'N': 1000,  # number of total samples
         'valid_size': 0.2,
@@ -153,7 +158,65 @@ def generate_data(data_path, sim_params):
         print('Data Already Generated')
 
 
-def run_simulation(task_id, n_tasks, sim_params):
+def run_m_sweep_simulation(task_id, n_tasks, sim_params):
+    start_time = time()
+    N = sim_params['N']
+    Nr = sim_params['Nr']
+    ds_factor = sim_params['im_resize_factor']
+    data_path = f'{sim_params["data_path"]}/N_{N}_ds_factor_{ds_factor}'.replace('.', 'p')
+    figures_path = (f'{sim_params["figures_path"]}/N_{N}_ds_factor_{ds_factor}_Nr_{Nr}_bias'
+                    f'_{sim_params["angles_for_bias"]}').replace('.', 'p')
+
+    # generate data if requested
+    if sim_params['generate_data']:
+        if task_id == 0:
+            generate_data(data_path, sim_params)
+        else:
+            print(f"This is machine {task_id}, only machine 0 generates data, skipping...")
+        return
+
+    os.makedirs(figures_path, exist_ok=True)
+    # load data
+    with open(f"{data_path}/data_dict.pkl", 'rb') as fp:
+        data_dict = pickle.load(fp)
+        print('Data dictionary loaded successfully')
+
+    results = []
+    m_values = sim_params['m_values']
+    task_counter = 0  # task counter to assign jobs to the different machines
+    pbar = tqdm.tqdm(total=len(m_values)* (len(sim_params['seeds'] + len(sim_params['sampling_methods'] - 1))), 
+                     desc=f"Task {task_id}")
+    for m in m_values:
+        for sampling_method in sim_params['sampling_methods']:
+            for seed in sim_params['seeds']:
+                if task_counter % n_tasks == task_id:
+                    validation_idx = get_validation_indices(sim_params, seed=seed)
+                    new_results = process_iteration(data_dict, sim_params, validation_idx, figures_path,
+                                                    bias_factor=0, seed=seed)
+                    results.extend(new_results)
+                task_counter += 1
+                pbar.update(1)
+                # stride and uniform sampling methods are not random and thus do not require multiple seeds
+                # we can break the loop after the first seed for these methods
+                if sampling_method in {'stride', 'uniform'}:
+                    break
+                    
+                    
+    # save results to csv
+    results_df = pd.DataFrame(results)
+    os.makedirs(f'{figures_path}/machine_output', exist_ok=True)
+    results_df.to_csv(f'{figures_path}/machine_output/machine_{task_id}.csv', index=False)
+    print(f"Total Simulation Time for task_id {task_id}: {time() - start_time:.2f} seconds")
+    # save sim_params
+    if task_id == 0:
+        sim_params_json = deepcopy(sim_params)
+        sim_params_json['font_properties_title'] = 'Incompatible with JSON'
+        sim_params_json['font_properties_ticks'] = 'Incompatible with JSON'
+        with open(f"{figures_path}/sim_params.json", 'w') as fp:
+            json.dump(sim_params_json, fp, indent=4)
+
+
+def run_discrepency_simulation(task_id, n_tasks, sim_params):
     start_time = time()
     N = sim_params['N']
     Nr = sim_params['Nr']
@@ -209,7 +272,12 @@ if __name__ == '__main__':
         if args.task_id == 0:
             merge_csvs(sim_params)
     else:
-        run_simulation(args.task_id, args.n_tasks, sim_params)
+        if sim_params['sim_type'] == 'm_sweep':
+            run_m_sweep_simulation(args.task_id, args.n_tasks, sim_params)
+        elif sim_params['sim_type'] == 'dist_discrepency':
+            run_discrepency_simulation(args.task_id, args.n_tasks, sim_params)
+        else:
+            raise ValueError(f"Invalid sim_type: {sim_params['sim_type']}. Must be 'm_sweep' or 'dist_discrepency'.")
 
 
 

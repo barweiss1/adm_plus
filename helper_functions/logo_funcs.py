@@ -13,6 +13,7 @@ from helper_functions.embed_methods import embed_wrapper
 from helper_functions.embed_methods import (OPT_METHODS, FULL_VIEW_DIFFUSION_METHODS, PARTIAL_VIEW_DIFFUSION_METHODS,
                                             FULL_VIEW_KERNEL_METHODS, PARTIAL_VIEW_KERNEL_METHODS, SINGLE_VIEW_METHODS)
 import helper_functions.plotting_funcs as plot_funcs
+from time import time
 
 
 # adds noise to an image in uint8 representation
@@ -85,12 +86,16 @@ def circ2lin_angles(angles):
     return lin_angles
 
 
-def sample_reference_set(data_dict, sim_params, bias_factor=0, seed=0):
+def sample_reference_set(data_dict, sim_params, bias_factor=0, seed=0, 
+                         sampling_method='random', m_value=None):
     s1 = data_dict['s1']
     s2 = data_dict['s2']
     angles = lin2circ_angles(data_dict[f'{sim_params["angles_for_bias"]}_angles'])
     N = sim_params['N']
-    Nr = sim_params['Nr']
+    if m_value is not None:
+        Nr = m_value
+    else:
+        Nr = sim_params['Nr']
     # define probability weights
     weights = (angles / np.max(angles)) ** bias_factor
 
@@ -99,7 +104,31 @@ def sample_reference_set(data_dict, sim_params, bias_factor=0, seed=0):
 
     # randomly sample Nr angles with probability weight
     np.random.seed(seed)
-    ref_idx = np.random.choice(len(angles), size=Nr, replace=False, p=normalized_weights)
+    # sampling method can be 'random', 'uniform', or 'stride'
+    if sampling_method == 'random':
+        # sample at random with probability weights based on the angles to create bias in the reference set
+        # if bias_factor is 0, this is just random uniform sampling
+        ref_idx = np.random.choice(len(angles), size=Nr, replace=False, p=normalized_weights)
+    elif sampling_method == 'uniform':
+        # sample uniformly across the angles by taking every N/Nr angle
+        ref_idx = np.round(np.linspace(0, N - 1, Nr)).astype(int)
+    elif sampling_method == 'stride':
+        # sample in strided manner taking stride numner of consecutive angles and then skipping
+        # to the next stride with even space between them
+        stride = sim_params['stride_param']
+        N_small = Nr // stride
+        residue = Nr - (N_small * stride)
+        ref_idx = [np.round(np.linspace(s, N - 1, N_small)).astype(int) for s in range(stride)]
+        ref_idx = np.array(ref_idx).flatten()
+        ref_idx.sort()
+        # if there is residue, add some random samples to the reference set
+        if residue > 0:
+            remaining_idx = [i for i in range(N) if i not in ref_idx]
+            additional_idx = np.random.choice(remaining_idx, size=residue, replace=False, 
+                                              p=normalized_weights[remaining_idx] / np.sum(normalized_weights[remaining_idx]))
+            ref_idx = np.concatenate((ref_idx, additional_idx))
+    else:
+        raise ValueError(f"Invalid sampling method: {sampling_method}. Must be 'random', 'uniform', or 'stride'.")
 
     # select views
     total_idx = np.round(np.linspace(0, N - 1, N)).astype(int)
@@ -120,8 +149,12 @@ def sample_reference_set(data_dict, sim_params, bias_factor=0, seed=0):
     return s1_ref, s2_ref, s1_aligned, s2_aligned, reorder_idx, ref_idx
 
 
-def evaluate_embed(embed, sim_params, validation_idx, angles_common, method, scale, bias_factor, seed):
-    Nr = sim_params['Nr']
+def evaluate_embed(embed, sim_params, validation_idx, angles_common, method, scale, bias_factor, seed,
+                   runtime, sampling_method='random', m_value=None):
+    if m_value is not None:
+        Nr = m_value
+    else:
+        Nr = sim_params['Nr']
     error_mae, error_std = embed_error(embed, angles_common, plot_flag=False, metric='MAE')
     error_mae_val, _ = embed_error(embed[validation_idx, :], angles_common[validation_idx], plot_flag=False,
                                    metric='MAE')
@@ -137,6 +170,10 @@ def evaluate_embed(embed, sim_params, validation_idx, angles_common, method, sca
                 'MAE': error_mae,
                 'MAE_valid': error_mae_val,
                 'STD': error_std,
+                'runtime': runtime,
+                'sampling_method': sampling_method,
+                'm_value': m_value,
+                'stride': sim_params['stride_param'] if sampling_method == 'stride' else None,
                 'RMSE w centered data': error_mse_center,
                 'MAE w centered data': error_mae_center,
                 'STD center': error_std_center,
@@ -146,18 +183,26 @@ def evaluate_embed(embed, sim_params, validation_idx, angles_common, method, sca
     return new_line
 
 
-def process_iteration(data_dict, sim_params, validation_idx, figures_path, bias_factor=0, seed=0):
+def process_iteration(data_dict, sim_params, validation_idx, figures_path, bias_factor=0, 
+                      seed=0, sampling_method='random', m_value=None):
     (s1_ref, s2_ref, s1_aligned, s2_aligned,
      reorder_idx, ref_idx) = sample_reference_set(data_dict, sim_params, bias_factor, seed)
-    iteration_path = f'{figures_path}/bias_factor_{bias_factor}_seed_{seed}'.replace('.', 'p')
+    if sim_params['sim_type'] == 'm_sweep':
+        iteration_path = f'{figures_path}/sampling_{sampling_method}_m_value_{m_value}_seed_{seed}'.replace('.', 'p')
+    elif sim_params['sim_type'] == 'dist_discrepency':
+        iteration_path = f'{figures_path}/bias_factor_{bias_factor}_seed_{seed}'.replace('.', 'p')
     os.makedirs(iteration_path, exist_ok=True)
     # load paramerters for plot
-    Nr = sim_params['Nr']
+    if m_value is not None:
+        Nr = m_value
+    else:
+        Nr = sim_params['Nr']
     figsize = sim_params['figsize']
     font_properties_ticks = sim_params['font_properties_ticks']
     angles_common = lin2circ_angles(data_dict[f'common_angles'])
     results = []
     for scale in tqdm.tqdm(sim_params['scales']):
+        start_time = time()
         A1, _, _ = Create_Asym_Tran_Kernel(s1_aligned, s1_ref, mode='median', scale=scale)
         A2, _, _ = Create_Asym_Tran_Kernel(s2_aligned, s2_ref, mode='median', scale=scale)
         if {'kcca_impute', 'ad', 'ad_svd'}.intersection(sim_params['ad_methods']):
@@ -192,12 +237,13 @@ def process_iteration(data_dict, sim_params, validation_idx, figures_path, bias_
                                       K1=A1, K2=A2, solver=sim_params['evd_solver'],
                                       delete_kernels=sim_params['delete_kernels'])
                 embed = embed[reorder_idx, :]
-
+            
+            runtime = time() - start_time
             plot_method_embedding(embed, iteration_path, angles_common, Nr, method_key, ref_idx,
                                   plot_flag=False, pointsize=20, pointsize_ref=30,
                                   fontproperties=font_properties_ticks, figsize=figsize)
             new_line = evaluate_embed(embed, sim_params, validation_idx, angles_common, method, scale,
-                                      bias_factor, seed)
+                                      bias_factor, seed, runtime, sampling_method, m_value)
             results.append(new_line)
     return results
 
