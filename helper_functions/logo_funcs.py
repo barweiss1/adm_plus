@@ -114,14 +114,23 @@ def sample_reference_set(data_dict, sim_params, bias_factor=0, seed=0,
         ref_idx = np.round(np.linspace(0, N - 1, Nr)).astype(int)
     elif sampling_method == 'stride':
         # sample in strided manner taking stride numner of consecutive angles and then skipping
-        # to the next stride with even space between them
         stride = sim_params['stride_param']
         N_small = Nr // stride
         residue = Nr - (N_small * stride)
-        ref_idx = [np.round(np.linspace(s, N - stride + s - 1, N_small)).astype(int) for 
-                   s in range(stride)]
-        ref_idx = np.array(ref_idx).flatten()
+        # to the next stride with even space between them
+        init_ref_idx = np.round(np.linspace(0, N - stride, N_small)).astype(int)
+        ref_idx = init_ref_idx.copy()
+        print('initial ref idx shape:', ref_idx.shape)
+        for s in range(1, stride):
+            new_ref_idx = init_ref_idx + s
+            print(f"new ref idx shape for stride {s}:", new_ref_idx.shape)
+            new_ref_idx = new_ref_idx[new_ref_idx < N]  # Ensure indices are
+            ref_idx = np.concatenate((ref_idx, new_ref_idx))
         ref_idx.sort()
+        # ref_idx = [np.round(np.linspace(s, N - stride + s - 1, N_small)).astype(int) for 
+        #            s in range(stride)]
+        # ref_idx = np.array(ref_idx).flatten()
+        # ref_idx.sort()
         # if there is residue, add some random samples to the reference set
         if residue > 0:
             remaining_idx = [i for i in range(N) if i not in ref_idx]
