@@ -118,7 +118,8 @@ def sample_reference_set(data_dict, sim_params, bias_factor=0, seed=0,
         stride = sim_params['stride_param']
         N_small = Nr // stride
         residue = Nr - (N_small * stride)
-        ref_idx = [np.round(np.linspace(s, N - 1, N_small)).astype(int) for s in range(stride)]
+        ref_idx = [np.round(np.linspace(s, N - stride + s - 1, N_small)).astype(int) for 
+                   s in range(stride)]
         ref_idx = np.array(ref_idx).flatten()
         ref_idx.sort()
         # if there is residue, add some random samples to the reference set
@@ -173,7 +174,7 @@ def evaluate_embed(embed, sim_params, validation_idx, angles_common, method, sca
                 'runtime': runtime,
                 'sampling_method': sampling_method,
                 'm_value': m_value,
-                'stride': sim_params['stride_param'] if sampling_method == 'stride' else None,
+                'stride': sim_params['stride_param'] if sampling_method == 'stride' else 0,
                 'RMSE w centered data': error_mse_center,
                 'MAE w centered data': error_mae_center,
                 'STD center': error_std_center,
@@ -348,17 +349,18 @@ def plot_method_embedding(embed, figures_path, angles, Nr, method, ref_idx, plot
     fig, ax = plot_funcs.subplots_plot(1, 1, figsize=figsize)
     colors = lin2circ_angles(angles)
     N_d = embed.shape[0]
-    total_idx = np.round(np.linspace(0, N_d - 1, N_d)).astype(int)
+    # total_idx = np.round(np.linspace(0, N_d - 1, N_d)).astype(int)
+    total_idx = np.arange(N_d)
     single_idx = [i for i in total_idx if i not in ref_idx]
     # define font
-    if fontproperties is None:
-        my_fontproperties = font_manager.FontProperties(family='Times New Roman', size=18)
-    else:
-        my_fontproperties = fontproperties
-    if tick_fontproperties is None:
-        my_tick_fontproperties = font_manager.FontProperties(family='Times New Roman', size=18)
-    else:
-        my_tick_fontproperties = tick_fontproperties
+    # if fontproperties is None:
+    #     my_fontproperties = font_manager.FontProperties(family='Times New Roman', size=18)
+    # else:
+    #     my_fontproperties = fontproperties
+    # if tick_fontproperties is None:
+    #     my_tick_fontproperties = font_manager.FontProperties(family='Times New Roman', size=18)
+    # else:
+    #     my_tick_fontproperties = tick_fontproperties
     ax.scatter(embed[ref_idx, 0], embed[ref_idx, 1], marker='x', c=colors[ref_idx],
                label='Full View', s=pointsize_ref, cmap='viridis')
     ax.scatter(embed[single_idx, 0], embed[single_idx, 1], marker='.', c=colors[single_idx],
@@ -398,11 +400,11 @@ def plot_method_embedding(embed, figures_path, angles, Nr, method, ref_idx, plot
     ax.set_ylim(-max_extent, max_extent)
 
     # ax.set_title("M&M Angle Colors - Spectral Completed Data, $N_R = {}$".format(Nr))
-    ax.set_xlabel("First Diffusion Coordinate", font_properties=my_fontproperties)
-    ax.set_ylabel("Second Diffusion Coordinate", font_properties=my_fontproperties)
+    ax.set_xlabel("First Diffusion Coordinate", fontsize=18)
+    ax.set_ylabel("Second Diffusion Coordinate", fontsize=18)
     # ax.legend(loc='upper right')
     for label in ax.get_xticklabels() + ax.get_yticklabels():
-        label.set_fontproperties(my_tick_fontproperties)
+        label.set_fontsize(18)
     if plot_flag:
         plt.show()
     plt.savefig(f"{figures_path}/{method}_embedding.pdf", dpi=300, format='pdf', bbox_inches='tight')
@@ -412,12 +414,12 @@ def plot_method_embedding(embed, figures_path, angles, Nr, method, ref_idx, plot
                label='Partial View', s=pointsize)
     ax.scatter(embed[ref_idx, 0], embed[ref_idx, 1], marker='.', c='b', label='Full View', s=pointsize)
     # ax.set_title("Spectral Completed - Reference Vs. Completed")
-    ax.set_xlabel("First Diffusion Coordinate", font_properties=my_fontproperties)
-    ax.set_ylabel("Second Diffusion Coordinate", font_properties=my_fontproperties)
+    ax.set_xlabel("First Diffusion Coordinate", fontsize=18)
+    ax.set_ylabel("Second Diffusion Coordinate", fontsize=18)
 
     ax.legend(loc='upper right')
     for label in ax.get_xticklabels() + ax.get_yticklabels():
-        label.set_fontproperties(my_fontproperties)
+        label.set_fontsize(18)
     if plot_flag:
         plt.show()
     plt.savefig(f"{figures_path}/{method}_embedding_comp_vs_ref.pdf", dpi=300, format='pdf', bbox_inches='tight')
