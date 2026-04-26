@@ -123,7 +123,7 @@ def sample_reference_set(data_dict, sim_params, bias_factor=0, seed=0,
         ref_idx.sort()
         # if there is residue, add some random samples to the reference set
         if residue > 0:
-            remaining_idx = [i for i in range(N) if i not in ref_idx]
+            remaining_idx = [i for i in range(N - 1) if i not in ref_idx]
             additional_idx = np.random.choice(remaining_idx, size=residue, replace=False, 
                                               p=normalized_weights[remaining_idx] / np.sum(normalized_weights[remaining_idx]))
             ref_idx = np.concatenate((ref_idx, additional_idx))
