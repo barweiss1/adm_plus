@@ -190,7 +190,7 @@ The repository currently includes local data and generated outputs used during d
 
 ## Citation
 
-If you use this code, please cite our paper:
+If you find this work interesting or useful in your research, please cite our paper:
 
 ```bibtex
 @article{admplus2026extracting,
